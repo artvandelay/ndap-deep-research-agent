@@ -486,19 +486,19 @@
         "X-Title": "NDAP Deep Research Agent",
       };
     }
-    async function orComplete(messages, temperature = 0.2) {
+    async function orComplete(messages, temperature = 0.2, maxTokens = 1024) {
       const res = await fetch(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature }),
+        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens }),
       });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const data = await res.json();
       return data.choices?.[0]?.message?.content || "";
     }
-    async function orStream(messages, temperature, onDelta) {
+    async function orStream(messages, temperature, onDelta, maxTokens = 1800) {
       const res = await fetch(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature, stream: true }),
+        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, stream: true }),
       });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const reader = res.body.getReader();
@@ -562,9 +562,9 @@
     }
 
     async function selectDataset(question, candidates) {
-      const slim = candidates.map((c) => ({ id: c.id, name: c.name, geo: c.geo, years: c.years }));
+      const slim = candidates.map((c) => ({ id: c.id, name: c.name, geo: c.geo, years: c.years, about: c.description }));
       const messages = [
-        { role: "system", content: "Pick the single best dataset to download to answer the question, from the candidates. Return JSON only." },
+        { role: "system", content: "Pick the single best dataset to DOWNLOAD to actually answer the question, from the candidates. Prefer a dataset whose measures contain the absolute counts/values the question needs (e.g. population totals) over derived datasets (shares, ratios, percentages) unless the question explicitly asks for those. Match the geography/time the question needs. Return JSON only." },
         { role: "user", content: `Question:\n${question}\n\nCandidates:\n${JSON.stringify(slim)}\n\nReturn exactly: {"dataset_id": <id>, "reason": "..."}` },
       ];
       try {
