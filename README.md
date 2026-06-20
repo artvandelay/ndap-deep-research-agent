@@ -153,6 +153,15 @@ the answer with the actual values. The numbers reflect the breakdown encoded in
 the stored recipe (e.g. national/by-dimension); if a requested entity isn't in
 those rows, the model is instructed to say so.
 
+### Multi-turn memory
+
+The demo keeps a compressed memory of the last few turns (question + trimmed
+answer + dataset used) and feeds it into planning, dataset selection, and
+synthesis, so elliptical follow-ups like "break that down by sex" stay on the
+same topic. It is intentionally small (a few turns) to keep token use low; use
+the "New chat" button (top-right) to reset memory. On credit, context, auth, or
+proxy errors the demo shows a short, actionable message instead of failing hard.
+
 To refresh the static Pages assets after rebuilding `data/index.db`:
 
 ```bash

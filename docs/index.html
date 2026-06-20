@@ -302,6 +302,11 @@
       </div>
       <div class="spacer"></div>
       <div id="indexPill" class="pill"><span class="dot"></span><span id="indexStatus">Loading index…</span></div>
+      <button id="newChat" class="icon-btn" title="New chat (clear memory)" aria-label="New chat">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 5v14M5 12h14"></path>
+        </svg>
+      </button>
       <button id="openSettings" class="icon-btn" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -383,11 +388,15 @@
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
     const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model
+    const MAX_TURNS = 3;          // compressed prior turns kept as context
+    const MAX_ANSWER_CHARS = 700; // per-turn answer length kept in memory
+    const MAX_HISTORY_CHARS = 3500; // total compressed-history budget
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
     let busy = false;
+    let convo = [];               // compressed multi-turn memory
 
     const settings = {
       get key() { return localStorage.getItem(LS.key) || ""; },
@@ -528,10 +537,47 @@
       const raw = fenced ? fenced[1] : text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
       return JSON.parse(raw);
     }
-    async function planSearch(question) {
+
+    /* ---------- Conversation memory (compressed) ---------- */
+    function compressedHistory() {
+      if (!convo.length) return "";
+      const recent = convo.slice(-MAX_TURNS);
+      let out = "";
+      for (const t of recent) {
+        const ds = t.dataset ? ` [used dataset ${t.dataset}]` : "";
+        const line = `Q: ${t.q}${ds}\nA: ${t.answer}\n\n`;
+        if (out.length + line.length > MAX_HISTORY_CHARS) break;
+        out += line;
+      }
+      return out.trim();
+    }
+
+    function rememberTurn(question, datasetLabel, answer) {
+      const trimmed = (answer || "").replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
+      convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
+      if (convo.length > MAX_TURNS * 2) convo = convo.slice(-MAX_TURNS * 2);
+    }
+
+    // Turn an API error into a short, friendly, actionable message.
+    function friendlyError(err) {
+      const m = String(err && err.message || err);
+      if (/\b402\b|requires more credits|insufficient/i.test(m))
+        return "Out of OpenRouter credits for this request. Add credits or pick a cheaper model in Settings, then try again.";
+      if (/context length|maximum context|too many tokens|\b413\b/i.test(m))
+        return "This conversation got too long for the model's context. Start a new chat (top-right) to reset, or ask a shorter question.";
+      if (/\b401\b|invalid api key|no auth/i.test(m))
+        return "OpenRouter rejected the API key. Check it in Settings.";
+      if (/\b429\b|rate limit/i.test(m))
+        return "OpenRouter rate-limited this request. Wait a moment and try again.";
+      if (/proxy|NDAP|openapi|Failed to fetch|networkerror/i.test(m))
+        return `Couldn't reach the data proxy / NDAP. Check the Data proxy URL in Settings. (${m.slice(0, 120)})`;
+      return m.slice(0, 240);
+    }
+    async function planSearch(question, history) {
+      const ctx = history ? `Conversation so far (for resolving follow-ups like "and for X?"):\n${history}\n\n` : "";
       const messages = [
-        { role: "system", content: "You plan searches over an NDAP metadata index. Return JSON only. Pick concise search terms plus useful synonyms. Do not answer the question." },
-        { role: "user", content: `Question:\n${question}\n\nReturn exactly: {"search_query":"...","reason":"..."}` },
+        { role: "system", content: "You plan searches over an NDAP metadata index. Return JSON only. Pick concise search terms plus useful synonyms. Use the prior conversation to resolve follow-up references. Do not answer the question." },
+        { role: "user", content: `${ctx}Current question:\n${question}\n\nReturn exactly: {"search_query":"...","reason":"..."}` },
       ];
       try {
         const parsed = extractJson(await orComplete(messages, 0));
@@ -561,11 +607,12 @@
       return `${settings.proxy}/?url=${encodeURIComponent(url)}`;
     }
 
-    async function selectDataset(question, candidates) {
+    async function selectDataset(question, candidates, history) {
       const slim = candidates.map((c) => ({ id: c.id, name: c.name, geo: c.geo, years: c.years, about: c.description }));
+      const ctx = history ? `Conversation so far (use it to interpret follow-up references like "that"):\n${history}\n\n` : "";
       const messages = [
-        { role: "system", content: "Pick the single best dataset to DOWNLOAD to actually answer the question, from the candidates. Prefer a dataset whose measures contain the absolute counts/values the question needs (e.g. population totals) over derived datasets (shares, ratios, percentages) unless the question explicitly asks for those. Match the geography/time the question needs. Return JSON only." },
-        { role: "user", content: `Question:\n${question}\n\nCandidates:\n${JSON.stringify(slim)}\n\nReturn exactly: {"dataset_id": <id>, "reason": "..."}` },
+        { role: "system", content: "Pick the single best dataset to DOWNLOAD to actually answer the question, from the candidates. Use the prior conversation to keep the SAME topic on follow-ups (e.g. if the topic was slum population, stay on slum datasets). Prefer a dataset whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. Match the geography/time the question needs. Return JSON only." },
+        { role: "user", content: `${ctx}Current question:\n${question}\n\nCandidates:\n${JSON.stringify(slim)}\n\nReturn exactly: {"dataset_id": <id>, "reason": "..."}` },
       ];
       try {
         const parsed = extractJson(await orComplete(messages, 0));
@@ -727,10 +774,12 @@
       addUser(question);
       const ui = addAssistant();
 
+      const history = compressedHistory();
+      let usedDataset = "";
       try {
         // 1) plan
-        ui.procInner.appendChild(step("plan_search", "calling model…", ""));
-        const plan = await planSearch(question);
+        ui.procInner.appendChild(step("plan_search", history ? "calling model (with prior context)…" : "calling model…", ""));
+        const plan = await planSearch(question, history);
         ui.procInner.lastChild.remove();
         ui.procInner.appendChild(step("plan_search", "model proposed search terms", `query: ${plan.search_query}\nreason: ${plan.reason}`));
         scrollDown();
@@ -752,13 +801,16 @@
           ui.procMeta.textContent = "done";
           ui.proc.open = false;
           ui.answer.innerHTML = `<div class="err">No matching NDAP datasets in the local index. Try broader or different terms.</div>`;
+          rememberTurn(question, "", "No matching datasets found.");
           return;
         }
 
+        const histPreamble = history ? `Conversation so far (compressed, for follow-up context):\n${history}\n\n` : "";
+
         // 4) optionally download real rows through the proxy
         const metadataMessages = () => ([
-          { role: "system", content: "You are an NDAP-only research assistant. Answer using ONLY the supplied NDAP metadata. Cite dataset IDs. Use markdown. Do not invent raw values, causal claims, or future predictions. If raw data is needed for a number, say which dataset to download next." },
-          { role: "user", content: `User question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
+          { role: "system", content: "You are an NDAP-only research assistant. Answer using ONLY the supplied NDAP metadata. Use prior conversation only to interpret the question. Cite dataset IDs. Use markdown. Do not invent raw values, causal claims, or future predictions. If raw data is needed for a number, say which dataset to download next." },
+          { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
         ]);
 
         let messages;
@@ -766,7 +818,8 @@
           const selStep = step("select_dataset", "choosing dataset to download…", "");
           selStep.querySelector(".tool-dot").className = "tool-dot run";
           ui.procInner.appendChild(selStep); scrollDown();
-          const { pick, reason } = await selectDataset(question, candidates);
+          const { pick, reason } = await selectDataset(question, candidates, history);
+          usedDataset = `${pick.id} (${pick.name})`;
           selStep.querySelector(".tool-dot").className = "tool-dot done";
           selStep.querySelector(".tool-detail").textContent = `chose ${pick.id} — ${pick.name}`;
           selStep.appendChild(el("div", "payload", `reason: ${reason}`));
@@ -787,8 +840,8 @@
               `columns: ${columns.join(", ")}\n\n${csv.split("\n").slice(0, 12).join("\n")}${used.length > 11 ? "\n…" : ""}`));
             scrollDown();
             messages = [
-              { role: "system", content: "You are an NDAP-only data analyst. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset. Cite the dataset ID, show the exact numbers you used (a small markdown table is ideal), and state the units/year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly." },
-              { role: "user", content: `Question:\n${question}\n\nDataset ${pick.id} — ${pick.name}\nColumns: ${columns.join(", ")}\nRows provided: ${used.length}${rows.length > used.length ? ` (most relevant of ${rows.length}${truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${csv}\n\nAnswer with the actual numbers.` },
+              { role: "system", content: "You are an NDAP-only data analyst. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset. Use prior conversation only to interpret the question. Cite the dataset ID, show the exact numbers you used (a small markdown table is ideal), and state the units/year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly." },
+              { role: "user", content: `${histPreamble}Current question:\n${question}\n\nDataset ${pick.id} — ${pick.name}\nColumns: ${columns.join(", ")}\nRows provided: ${used.length}${rows.length > used.length ? ` (most relevant of ${rows.length}${truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${csv}\n\nAnswer with the actual numbers.` },
             ];
           } catch (dataErr) {
             dlStep.querySelector(".tool-dot").className = "tool-dot done";
@@ -819,6 +872,8 @@
         ui.procMeta.textContent = "done";
         ui.proc.open = false;
 
+        rememberTurn(question, usedDataset, finalText);
+
         // answer tools
         const tools = el("div", "answer-tools");
         const copyBtn = el("button", "ghost", "Copy");
@@ -826,8 +881,10 @@
         tools.appendChild(copyBtn);
         ui.answer.appendChild(tools);
       } catch (e) {
+        ui.answer.classList.remove("cursor");
         ui.procMeta.textContent = "error";
-        ui.answer.innerHTML = `<div class="err">${escapeHtml(e.message)}</div>`;
+        ui.proc.open = true;
+        ui.answer.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`;
       } finally {
         busy = false; $("send").disabled = false;
         input.focus();
@@ -843,11 +900,24 @@
     ];
     function renderChips() {
       const box = $("chips");
+      if (!box) return;
       CHIPS.forEach((c) => {
         const b = el("button", "chip", escapeHtml(c));
         b.onclick = () => { $("input").value = c; autoGrow(); run(); };
         box.appendChild(b);
       });
+    }
+
+    function resetChat() {
+      if (busy) return;
+      convo = [];
+      $("thread").innerHTML =
+        '<div class="welcome" id="welcome">' +
+        '<h2 class="big">What do you want to find in NDAP?</h2>' +
+        '<p>I plan a search, retrieve candidate datasets from a local index built from <code>data/index.db</code>, and answer grounded in that metadata. Pick a starting point:</p>' +
+        '<div class="chips" id="chips"></div></div>';
+      renderChips();
+      $("input").focus();
     }
 
     function autoGrow() {
@@ -861,6 +931,7 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); }
     });
     $("send").addEventListener("click", run);
+    $("newChat").addEventListener("click", resetChat);
 
     $("openSettings").addEventListener("click", openDrawer);
     $("closeSettings").addEventListener("click", closeDrawer);
