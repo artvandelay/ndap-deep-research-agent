@@ -366,7 +366,7 @@
       <div class="field">
         <input id="proxyInput" placeholder="https://ndap-cors-proxy.…workers.dev" autocomplete="off" spellcheck="false" />
       </div>
-      <p class="help">Enables <b>real numbers</b>: the agent downloads dataset rows through this CORS proxy and computes the answer. Leave blank for discovery-only mode. See <code>proxy/</code> in the repo to deploy one free.</p>
+      <p class="help">Enables <b>real numbers</b>: the agent downloads dataset rows through this CORS proxy and computes the answer. Pre-filled with a shared demo proxy; clear it for discovery-only mode, or deploy your own (see <code>proxy/</code> in the repo).</p>
 
       <label for="limitInput">Candidate datasets to retrieve</label>
       <div class="field">
@@ -385,6 +385,7 @@
     const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
     const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy" };
     const DEFAULT_MODEL = "openai/gpt-5.5";
+    const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
     const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model
@@ -402,7 +403,10 @@
       get key() { return localStorage.getItem(LS.key) || ""; },
       get model() { return localStorage.getItem(LS.model) || DEFAULT_MODEL; },
       get limit() { return Math.max(3, Math.min(12, Number(localStorage.getItem(LS.limit) || 8))); },
-      get proxy() { return (localStorage.getItem(LS.proxy) || "").trim().replace(/\/+$/, ""); },
+      get proxy() {
+        const v = localStorage.getItem(LS.proxy);
+        return (v === null ? DEFAULT_PROXY : v).trim().replace(/\/+$/, "");
+      },
     };
 
     const el = (tag, cls, html) => {
