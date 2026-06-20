@@ -1,0 +1,131 @@
+{
+  "API_Key": "fixture_api_key_7171",
+  "sourcedetails": {
+    "Data": [
+      {
+        "SourceName": "Estimated Number and Area of Operational Holdings by Size Classes and Tenancy Status",
+        "SectorName": "Agriculture and Cooperation",
+        "MinistryName": "Ministry of Agriculture and Farmers Welfare",
+        "DepartmentName": "Department of Agriculture & Farmers Welfare",
+        "LocalityGranularity": "State, District",
+        "FromTimerange": 2015,
+        "ToTimerange": 2015,
+        "UpdateFrequency": "Quinquennial",
+        "noOfColumns": 27,
+        "SourceLink": "https://agcensus.da.gov.in/docragc.html",
+        "Notes": "",
+        "Indicators": {
+          "Items": [
+            {
+              "ID": "I7171_8",
+              "DisplayName": "Wholly owned and self operated holdings",
+              "DataType": "Number",
+              "UnitsofMeaseure": "Number",
+              "ScalingFactor": 1,
+              "Description": "Wholly owned and self operated holdings"
+            }
+          ]
+        },
+        "Dimensions": {
+          "Items": [
+            {
+              "ID": "Country",
+              "DisplayName": "Country",
+              "DataType": "text",
+              "DimensionType": "Location",
+              "Description": "Country"
+            },
+            {
+              "ID": "StateCode",
+              "DisplayName": "State lgd code",
+              "DataType": "Number",
+              "DimensionType": "Location",
+              "Description": "State LGD Code"
+            },
+            {
+              "ID": "Year",
+              "DisplayName": "Year",
+              "DataType": "Number",
+              "DimensionType": "Time",
+              "Description": "Year"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
+{
+  "API_Key": "gAAAAABqNYhvAfwMc8KmtX1oBetp6ZNWLdmganYeIAvSbM4P3Dw4Jo0mMvM9U-r7ITwgwtPcMXa24oP84ETsdbrNJCgvQ-ZWBYV_W1rKJ_qyj4Pujw5STYyMEJoEiRDodd4wTLsQiT7EY4KDnxgSMVieTkAOKjm0xCun2kLvRK8uO4J1XyOL5yHID8rNeKTSGTUi8OTHuuaQ",
+  "sourcedetails": {
+    "Data": [
+      {
+        "SourceId": 7171,
+        "SourceName": "Estimated Number and Area of Operational Holdings by Size Classes and Tenancy Status",
+        "SectorName": "Agriculture and Cooperation",
+        "MinistryName": "Ministry of Agriculture and Farmers Welfare",
+        "DepartmentName": "Department of Agriculture & Farmers Welfare",
+        "LocalityGranularity": "State, District",
+        "FromTimerange": 2015.0,
+        "ToTimerange": 2015.0,
+        "UpdateFrequency": "Quinquennial",
+        "noOfColumns": 27,
+        "SourceLink": "https://agcensus.da.gov.in/docragc.html ",
+        "Notes": null,
+        "Indicators": {
+          "Items": [
+            {
+              "ID": "I7171_8",
+              "DisplayName": "Wholly owned and self operated holdings Scaling : [1]",
+              "DataType": "Number",
+              "UnitsofMeaseure": "Number",
+              "ScalingFactor": 1.0,
+              "Description": "Wholly owned and self operated holdings"
+            },
+            {
+              "ID": "I7171_9",
+              "DisplayName": "Partly owned and self operated holdings Scaling : [1]",
+              "DataType": "Number",
+              "UnitsofMeaseure": "Number",
+              "ScalingFactor": 1.0,
+              "Description": "Partly owned and self operated holdings"
+            },
+            {
+              "ID": "I7171_10",
+              "DisplayName": "Area operated under wholly owned and self operated holdings Scaling : [1000]",
+              "DataType": "Number",
+              "UnitsofMeaseure": "Hectares",
+              "ScalingFactor": 1000.0,
+              "Description": "Area operated under wholly owned and self operated holdings"
+            }
+          ]
+        },
+        "Dimensions": {
+          "Items": [
+            {
+              "ID": "Country",
+              "DisplayName": "Country",
+              "DataType": "text",
+              "DimensionType": "Location",
+              "Description": "Country"
+            },
+            {
+              "ID": "StateName",
+              "DisplayName": "State Name",
+              "DataType": "text",
+              "DimensionType": "Location",
+              "Description": "Name of State"
+            },
+            {
+              "ID": "DistrictName",
+              "DisplayName": "District Name",
+              "DataType": "text",
+              "DimensionType": "Location",
+              "Description": "Name of District"
+            }
+          ]
+        }
+      }
+    ]
+  }
+}

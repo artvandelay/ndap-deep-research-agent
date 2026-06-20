@@ -1,0 +1,33 @@
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+
+# Local IDE/runtime state
+.cursor/
+.firecrawl/
+tasks/
+
+# Generated NDAP artifacts
+data/catalogue.csv
+data/catalogue.json
+data/datasets/
+data/index.db-*
+data/logs/
+data/recon/
+data/research_papers.json
+data/sourcedetails/
+AGENTS.md
+
+# Logs and OS noise
+*.log
+Data_Standardization_Documentation*.pdf
+.DS_Store
