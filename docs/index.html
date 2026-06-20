@@ -571,6 +571,7 @@
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
+    let ndapPrompts = null;       // single source of truth for prompts (assets/prompts.json)
     let busy = false;
     let chats = [];               // all conversations [{id,title,createdAt,updatedAt,convo,transcript}]
     let currentChatId = null;
@@ -669,6 +670,22 @@
       if (!res.ok) throw new Error(`index fetch failed: ${res.status}`);
       ndapIndex = await res.json();
       refreshKeyPill();
+    }
+
+    // Prompts live in assets/prompts.json (shared verbatim with scripts/test_queries.py).
+    async function loadPrompts() {
+      if (ndapPrompts) return ndapPrompts;
+      const res = await fetch("assets/prompts.json");
+      if (!res.ok) throw new Error(`prompts fetch failed: ${res.status}`);
+      ndapPrompts = await res.json();
+      return ndapPrompts;
+    }
+    // Resolve a prompt by key, replacing {{token}} with another prompt entry or a caller param.
+    // One pass suffices because referenced entries hold no further tokens.
+    function P(key, params) {
+      const raw = (ndapPrompts && ndapPrompts[key]) || "";
+      const map = Object.assign({}, ndapPrompts, params || {});
+      return raw.replace(/\{\{(\w+)\}\}/g, (_, k) => (map[k] != null ? map[k] : ""));
     }
 
     function tokenize(text) {
@@ -1152,7 +1169,7 @@
     // Fast mode: one focused search query.
     async function planSearch(question, history) {
       const messages = [
-        { role: "system", content: "You plan searches over an NDAP metadata index. Return JSON only. Pick concise search terms plus useful synonyms. Use the prior conversation to resolve follow-up references. Do not answer the question." },
+        { role: "system", content: P("plan_search_sys") },
         { role: "user", content: `${convoBlock(history)}Current question:\n${question}\n\nReturn exactly: {"search_query":"...","reason":"..."}` },
       ];
       try {
@@ -1166,7 +1183,7 @@
     // Deep mode: decompose into 1-4 distinct data needs / search angles.
     async function planDeep(question, history) {
       const messages = [
-        { role: "system", content: "You plan a multi-step research process over an NDAP metadata index. Break the question into the distinct data needs required to answer it well — e.g. two different datasets covering separate measures that must be combined, or several facets of one topic. Return JSON only. Give 1-4 concise search queries (one per data need), each with useful synonyms. Use the prior conversation to resolve follow-up references. Do not answer the question." },
+        { role: "system", content: P("plan_deep_sys") },
         { role: "user", content: `${convoBlock(history)}Current question:\n${question}\n\nReturn exactly: {"search_queries":["...","..."],"sub_questions":["..."],"reason":"..."}` },
       ];
       try {
@@ -1205,7 +1222,7 @@
     async function selectDatasets(question, pool, alreadyHave, n, history) {
       const have = alreadyHave.length ? `Already downloaded: ${alreadyHave.join(", ")}. Pick only NEW datasets that add information still missing.\n` : "";
       const messages = [
-        { role: "system", content: `Choose the dataset(s) to DOWNLOAD that best answer the question — up to ${n}, but FEWER IS BETTER. A single dataset often answers the whole question, including breakdowns (by-sex, by-category, multiple years) that live as rows/dimensions within ONE dataset; pick that one and stop. Only add more datasets when they genuinely supply a distinct measure the first one(s) lack and that must be combined. Do NOT pad the list to reach the limit, and do NOT pick one dataset per phrase in the question. Use the prior conversation to keep the SAME topic on follow-ups. Prefer datasets whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. GEOGRAPHY: each candidate has "grain" (its finest geographic level, e.g. Country / State / State, District) and "dims" (its actual dimension names); judge fit by grain and dims, NOT by the title. A dataset can only answer for a place if its grain/dims can resolve that place — a specific city needs a city/town/ward dimension, a state needs State, a national/India-wide figure needs a Country-grain dataset that actually carries a national row. So for a national/all-India question, FIRST prefer the Country-grain dataset that reports the measure at the national level over state/district-disaggregated datasets (which often have NO national-aggregate row). If NO candidate has fine-enough grain for the asked place, pick the closest available coarser-grain dataset (so the answer can honestly report what IS available, with that caveat) rather than a mismatched one. INDIA SCOPE: this platform answers questions about India, so prefer India-scoped datasets (grain Country/State/District/etc.) over multi-country/'Global' series; only choose a Global-grain dataset when no India-scoped candidate covers the measure. Avoid duplicating already-downloaded data. Return JSON only.` },
+        { role: "system", content: P("select_datasets_sys", { n }) },
         { role: "user", content: `${convoBlock(history)}${have}Current question:\n${question}\n\nCandidates:\n${JSON.stringify(slimCandidates(pool))}\n\nReturn exactly: {"dataset_ids":[<id>, ...],"reason":"..."}` },
       ];
       const fresh = (c) => !alreadyHave.includes(String(c.id));
@@ -1228,7 +1245,7 @@
     async function reflect(question, collected, history) {
       const summary = collected.map((c) => `Dataset ${c.id} (${c.name}); columns: ${c.columns.join(", ")}; rows sampled: ${c.used.length}`).join("\n");
       const messages = [
-        { role: "system", content: "You judge whether the gathered NDAP datasets are sufficient to fully and accurately answer the question. Return JSON only. If NOT sufficient, give ONE concise new search query (with synonyms) targeting the missing piece. If sufficient, set sufficient=true and leave next_query empty." },
+        { role: "system", content: P("reflect_sys") },
         { role: "user", content: `${convoBlock(history)}Current question:\n${question}\n\nGathered so far:\n${summary || "(nothing downloaded yet)"}\n\nReturn exactly: {"sufficient":true|false,"missing":"...","next_query":"..."}` },
       ];
       try {
@@ -1338,34 +1355,24 @@
       const counts = partial ? `${c.used.length} of ${c.rows.length}${c.truncated ? "+" : ""} fetched` : `${c.used.length} (all rows)`;
       return `Rows provided: ${counts} — ${flag}`;
     }
-    // HARD RULE: the model may use NDAP data only — no outside knowledge or sources, ever.
-    const NDAP_HARD_RULE = " HARD RULE — SOURCE: NDAP is the ONLY permitted source. Use ONLY the NDAP data/metadata supplied in this prompt. Never use outside or general knowledge, training-data facts, or any non-NDAP source, and never cite or link anything other than NDAP datasets (ndap.niti.gov.in). If the supplied NDAP data does not answer the question, say so plainly instead of filling the gap from anywhere else.";
-    // Keeps multi-country / multi-period datasets pinned to India and the asked year.
-    const INDIA_SCOPE = " SCOPE: this platform answers questions about INDIA. If a dataset spans multiple countries or many time periods, isolate India and the year(s) the question asks for (or the most recent available) — never report another country's value or an unrelated/old period as if it were the answer.";
-    // Shared rule that stops the model from totalling a partial/truncated sample.
-    const AGG_GUARDRAIL = " CRITICAL aggregation rule: the supplied rows may be a PARTIAL, filtered, or TRUNCATED subset. Never compute a sum, total, count, or cross-entity average (across towns/states/categories) from a subset marked PARTIAL or TRUNCATED — that result would be wrong. Only aggregate across entities when the dataset is marked COMPLETE. If the question needs a total but the rows are partial/truncated/too granular, do not fabricate one: prefer a row that already represents the requested total (a pre-aggregated total / all-categories / national-level row the dataset itself provides), otherwise state the dataset is too granular or incomplete to total here and label it 'Low Confidence / Unverified'.";
     function metadataMessages(question, candidates, histPreamble) {
       return [
-        { role: "system", content: "You are an NDAP-only research assistant for India's National Data and Analytics Platform. Answer using ONLY the supplied NDAP metadata; use prior conversation only to interpret the question. Cite every dataset you rely on by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>, and also include the dataset's source URL if one is present in the supplied metadata. If you cannot point to a deterministic source (dataset ID or URL) for a statement, withhold it or label it 'Low Confidence / Unverified'. If your answer spans multiple datasets or relies on inferred values, tag those statements with a caveat and state key assumptions in plain language a non-technical reader can follow. Do not invent raw values. Do not make causal or driver claims or future predictions. Reply in the user's language. If NDAP evidence is insufficient, say so and name the dataset to download next. Use markdown. Write any mathematical formula as LaTeX, delimited by $…$ for inline math and $$…$$ for a display block, so it renders correctly." + NDAP_HARD_RULE },
+        { role: "system", content: P("metadata_sys") },
         { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
       ];
     }
-    const DATA_SYS_SINGLE = "You are an NDAP-only data analyst for India's National Data and Analytics Platform. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset; use prior conversation only to interpret the question. Cite the dataset by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (a small markdown table is ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly and label it 'Low Confidence / Unverified'. If you had to combine, derive, or assume anything, flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal claims or future predictions. Reply in the user's language. Use markdown. Write any mathematical formula as LaTeX, delimited by $…$ for inline math and $$…$$ for a display block, so it renders correctly." + INDIA_SCOPE + NDAP_HARD_RULE;
-    const DATA_SYS_MULTI = "You are an NDAP-only deep-research data analyst for India's National Data and Analytics Platform. You are given CSV rows from MULTIPLE NDAP datasets. Compute the answer ONLY from the supplied rows; use prior conversation only to interpret the question. Combine datasets when the question needs it (e.g. correlate or join on shared geography/time), but only join on matching keys actually present in the rows. Cite EVERY dataset you use by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (markdown tables are ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year/state) is missing from the rows, say so explicitly and label it 'Low Confidence / Unverified'. Whenever you combine, derive, or assume anything (e.g. aligning differing geographies or years), flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal/driver claims or future predictions. Reply in the user's language. Use markdown. Write any mathematical formula as LaTeX, delimited by $…$ for inline math and $$…$$ for a display block, so it renders correctly." + INDIA_SCOPE + NDAP_HARD_RULE;
 
     // Initial synthesis messages. When a dataset is larger than its sample, include a data
     // profile + the row-request protocol so the model can pull the exact rows it needs.
     function dataInitialMessages(question, collected, histPreamble, deep, anyHidden) {
-      const sys = (deep ? DATA_SYS_MULTI : DATA_SYS_SINGLE) + AGG_GUARDRAIL;
+      const sys = deep ? P("data_sys_multi") : P("data_sys_single");
       const blocks = collected.map((c) => {
         const hidden = c.used.length < c.rows.length;
         const profile = hidden ? `\n${profileText(c)}` : "";
         const sampleLabel = hidden ? `Sample rows (${c.used.length} most-relevant of ${c.rows.length}${c.truncated ? "+" : ""}, CSV):` : "All rows (CSV):";
         return `Dataset ${c.id} — ${c.name}\nColumns: ${c.columns.join(", ")}\n${rowsNote(c)}${profile}\n\n${sampleLabel}\n${c.csv}`;
       }).join("\n\n========================================\n\n");
-      const protocol = anyHidden
-        ? `\n\nIMPORTANT — you can pull MORE rows than the sample. These datasets are large and only a sample is shown. If the rows you need (a pre-aggregated total / all-categories / national-level row, a specific state/city, a specific year, or simply more rows) are NOT in the sample above, do NOT guess and do NOT claim the data is missing — request them. Use the listed dimension values to choose valid filters. When prompted, reply with ONLY this JSON:\n{"fetch_rows":{"dataset":<dataset id>,"where":{"<column>":"<value>"},"more":false,"reason":"why you need them"}}\nProvide "where" to filter rows by matching column values (case-insensitive substring), or omit "where" and set "more":true for the next batch of unseen rows. You may fetch up to ${MAX_DRILL_ITERS} times.`
-        : "";
+      const protocol = anyHidden ? P("drill_protocol", { max_drill_iters: MAX_DRILL_ITERS }) : "";
       const lead = collected.length > 1 ? `You have ${collected.length} NDAP datasets below — use them together as needed:\n\n` : "";
       return [
         { role: "system", content: sys },
@@ -1380,7 +1387,7 @@
       const messages = dataInitialMessages(question, collected, convoBlock(history), deep, anyHidden);
 
       if (anyHidden) {
-        const ask = `Decision: do you need additional or different rows to answer accurately? If yes, reply with ONLY the fetch_rows JSON. If the rows shown are sufficient, reply with exactly: READY`;
+        const ask = P("drill_ask");
         for (let i = 1; i <= MAX_DRILL_ITERS; i++) {
           messages.push({ role: "user", content: ask });
           const resp = await orComplete(messages, 0, 450);
@@ -1397,7 +1404,7 @@
         }
       }
 
-      const ANSWER_ASK = "Now write the final grounded answer in markdown prose — actual numbers, units, year, and cite each dataset by ID. Do NOT reply with JSON or a fetch_rows request; just write the answer. Use markdown; write any formula as LaTeX in $…$ or $$…$$.";
+      const ANSWER_ASK = P("answer_ask");
       const answer = async () => {
         try { return await orStream(messages, 0, onDelta, maxOut); }
         catch (_) { const t = await orComplete(messages, 0, maxOut); onDelta(t); return t; }
@@ -1552,6 +1559,7 @@
 
       setBusy(true);
       resetUsage();
+      try { await loadPrompts(); } catch (_) { /* boot load usually has it; metadata/data prompts degrade to empty if truly missing */ }
       input.value = ""; input.style.height = "auto";
       addUser(question);
       const ui = addAssistant();
@@ -1678,7 +1686,7 @@
     renderThread();
     renderChatList();
     renderModeToggle();
-    loadIndex().catch((err) => {
+    Promise.all([loadIndex(), loadPrompts()]).catch((err) => {
       $("indexPill").className = "pill warn";
       $("indexStatus").textContent = "index failed";
       const m = el("div", "msg bot");
