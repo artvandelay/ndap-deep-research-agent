@@ -11,7 +11,7 @@ if [[ -n "${VIRTUAL_ENV:-}" ]]; then
 fi
 
 echo "[wait] watching for harvest to complete..."
-while pgrep -f "python harvest_metadata.py" >/dev/null 2>&1; do
+while pgrep -f "harvest_metadata.py" >/dev/null 2>&1; do
     n=$(python - <<'PY'
 from pathlib import Path
 print(sum(1 for _ in Path("data/sourcedetails").glob("*.json")))
@@ -22,15 +22,17 @@ PY
 done
 
 echo "[build] harvest finished — rebuilding index"
-python build_index.py --src data/sourcedetails --catalogue data/catalogue.csv
-python -c "
+python ndap/build_index.py --src data/sourcedetails --catalogue data/catalogue.csv
+python - <<'PY'
+import sys
+sys.path.insert(0, "ndap")
 import sqlite3
 from schema import INDEX_DB_PATH
 c = sqlite3.connect(INDEX_DB_PATH)
 print('[build] datasets:', c.execute('select count(*) from datasets').fetchone()[0])
 print('[build] indicators:', c.execute('select count(*) from indicators').fetchone()[0])
 print('[build] dimensions:', c.execute('select count(*) from dimensions').fetchone()[0])
-"
+PY
 if [[ -f data/catalogue.csv ]]; then
     python scripts/check_index_coverage.py
 fi

@@ -25,33 +25,39 @@ The project is designed for deep-research agents that need to discover relevant 
 ```text
 .
 ├── README.md                         # Project documentation
-├── pyproject.toml                    # Python package metadata and dependencies
-├── schema.py                         # Shared schema, parsers, and OpenAPI URL builder
-├── ndap_client.py                    # NDAP catalogue/API client
-├── ndap_auth.py                      # NDAP Cognito token refresh helper
-├── harvest_metadata.py               # Harvest /v1/sourcedetails metadata
-├── build_index.py                    # Build SQLite + FTS metadata index
-├── query.py                          # Query layer over data/index.db
-├── ndap_download.py                  # On-demand dataset downloader
-├── mcp_server.py                     # FastMCP server exposing NDAP tools
-├── docs/                             # Static GitHub Pages demo
+├── pyproject.toml                    # Python dependencies
+├── ndap/                             # Core Python modules (run as python ndap/<module>.py)
+│   ├── schema.py                     # Shared schema, parsers, OpenAPI URL builder
+│   ├── ndap_client.py                # NDAP catalogue/API client
+│   ├── ndap_auth.py                  # NDAP Cognito token refresh helper
+│   ├── harvest_metadata.py           # Harvest /v1/sourcedetails metadata
+│   ├── build_index.py                # Build SQLite + FTS metadata index
+│   ├── query.py                      # Query layer over data/index.db
+│   ├── ndap_download.py              # On-demand dataset downloader
+│   └── mcp_server.py                 # FastMCP server exposing NDAP tools
+├── docs/                             # GitHub Pages publish dir (see docs/README.md)
 │   ├── index.html                    # Browser chat UI
 │   └── assets/
 │       ├── ndap_index.json           # DB-derived browser search index
-│       └── ndap_recipes.json         # Per-dataset openapi download recipes (optional)
-├── proxy/                            # Cloudflare Worker CORS proxy (optional, for real numbers)
+│       ├── ndap_recipes.json         # Per-dataset openapi download recipes
+│       └── prompts.json              # Model prompts (shared with scripts/test_queries.py)
+├── proxy/                            # Cloudflare Worker CORS proxy (optional)
 │   ├── worker.js
 │   └── wrangler.toml
 ├── scripts/
-│   ├── check_index_coverage.py        # Verify catalogue coverage in data/index.db
-│   ├── export_web_index.py            # Export data/index.db for the Pages demo
-│   ├── export_recipes.py              # Export download recipes for real-numbers mode
+│   ├── test_queries.py               # Headless regression test (same prompts as the web app)
+│   ├── check_index_coverage.py       # Verify catalogue coverage in data/index.db
+│   ├── export_web_index.py           # Export data/index.db for the Pages demo
+│   ├── export_recipes.py             # Export download recipes for real-numbers mode
 │   └── wait_and_build_index.sh       # Wait for harvest, then rebuild index
+├── reference/                        # Local PDFs/specs (gitignored)
 └── data/
     ├── index.db                      # Committed SQLite metadata/search index
     ├── index_summary.json            # Committed index coverage summary
     └── fixtures/                     # Small self-test fixtures
 ```
+
+The web app lives in `docs/` because GitHub Pages is configured to deploy from that folder on `main` — not because it is project documentation. See [docs/README.md](docs/README.md).
 
 Generated harvest inputs, logs, and downloaded CSVs are intentionally not committed. The committed DB is the retrieval artifact; raw observations remain on-demand local cache files.
 
@@ -96,7 +102,7 @@ NDAP_REFRESH_TOKEN=...
 NDAP_TOKEN=...
 ```
 
-`NDAP_REFRESH_TOKEN` is used by `harvest_metadata.py` to refresh Cognito access tokens for metadata harvests. `NDAP_TOKEN` is only needed for legacy authenticated catalogue downloads through `ndap_client.py`.
+`NDAP_REFRESH_TOKEN` is used by `ndap/harvest_metadata.py` to refresh Cognito access tokens for metadata harvests. `NDAP_TOKEN` is only needed for legacy authenticated catalogue downloads through `ndap/ndap_client.py`.
 
 ## Run The Chat Demo
 
@@ -205,6 +211,8 @@ The repo already includes `data/index.db`. Rebuild it when NDAP catalogue covera
 
 ```bash
 python - <<'PY'
+import sys
+sys.path.insert(0, "ndap")
 from pathlib import Path
 from ndap_client import NDAPClient
 
@@ -217,19 +225,19 @@ PY
 2. Harvest sourcedetails metadata.
 
 ```bash
-python harvest_metadata.py
+python ndap/harvest_metadata.py
 ```
 
 For a smaller test run:
 
 ```bash
-python harvest_metadata.py --limit 25
+python ndap/harvest_metadata.py --limit 25
 ```
 
 3. Build the SQLite/FTS index.
 
 ```bash
-python build_index.py --src data/sourcedetails --catalogue data/catalogue.csv
+python ndap/build_index.py --src data/sourcedetails --catalogue data/catalogue.csv
 ```
 
 The `--catalogue` argument ensures the DB includes every catalogue row. If a dataset is present in the catalogue but missing from `data/sourcedetails`, it is inserted as a catalogue-only fallback row.
@@ -242,9 +250,11 @@ python scripts/check_index_coverage.py
 
 ## Query The Index
 
-Use `query.py` from Python:
+Use `ndap/query.py` from Python (add `ndap/` to `sys.path`, or run from repo root):
 
 ```python
+import sys
+sys.path.insert(0, "ndap")
 import query
 
 matches = query.search_datasets("slum population city", limit=10)
@@ -254,7 +264,7 @@ metadata = query.get_dataset_metadata(matches[0]["id"])
 Download raw rows for a dataset:
 
 ```bash
-python ndap_download.py 9053
+python ndap/ndap_download.py 9053
 ```
 
 The command writes a cached CSV under `data/datasets/`.
@@ -264,8 +274,10 @@ The command writes a cached CSV under `data/datasets/`.
 Run the MCP server:
 
 ```bash
-python mcp_server.py
+python ndap/mcp_server.py
 ```
+
+If your MCP client config points at this server, use the path `ndap/mcp_server.py` (repo root as working directory).
 
 Available MCP tools:
 
