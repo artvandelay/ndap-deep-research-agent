@@ -1,5 +1,11 @@
 # NDAP Deep Research Agent
 
+### ▶ Try the live demo: https://artvandelay.github.io/ndap-deep-research-agent/
+
+A browser-based agentic chat over India's National Data and Analytics Platform (NDAP) — bring your own OpenRouter key and start asking. No install required.
+
+---
+
 Agent-ready tooling for exploring India's National Data and Analytics Platform (NDAP). This repository ships a local SQLite metadata index of NDAP datasets, exposes the index through an MCP server, and provides on-demand dataset downloads for grounded analytical answers.
 
 The project is designed for deep-research agents that need to discover relevant datasets, inspect indicators and dimensions, download raw observations, and produce traceable answers without hallucinating beyond available NDAP evidence.
@@ -9,7 +15,7 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser.
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. It includes a multi-conversation sidebar with saved chat history, per-query cost/token accounting, and a visible agent trace (plan → search → retrieve → download → synthesize).
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -153,14 +159,22 @@ the answer with the actual values. The numbers reflect the breakdown encoded in
 the stored recipe (e.g. national/by-dimension); if a requested entity isn't in
 those rows, the model is instructed to say so.
 
-### Multi-turn memory
+### Conversations and multi-turn memory
 
 The demo keeps a compressed memory of the last few turns (question + trimmed
 answer + dataset used) and feeds it into planning, dataset selection, and
 synthesis, so elliptical follow-ups like "break that down by sex" stay on the
-same topic. It is intentionally small (a few turns) to keep token use low; use
-the "New chat" button (top-right) to reset memory. On credit, context, auth, or
-proxy errors the demo shows a short, actionable message instead of failing hard.
+same topic. It is intentionally small (a few turns) to keep token use low.
+
+Conversations are saved per-chat in your browser's localStorage and listed in
+the left **sidebar**, grouped by recency (Today / Yesterday / Previous 7/30
+days). Switch between past chats, start a fresh one with **New chat**, or delete
+any conversation; the active chat reopens on reload. The sidebar collapses to an
+off-canvas drawer on small screens. Everything stays in your browser — nothing
+is uploaded.
+
+On credit, context, auth, or proxy errors the demo shows a short, actionable
+message instead of failing hard.
 
 To refresh the static Pages assets after rebuilding `data/index.db`:
 

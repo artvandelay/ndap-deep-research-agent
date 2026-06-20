@@ -403,11 +403,6 @@
       </div>
       <div class="spacer"></div>
       <div id="indexPill" class="pill"><span class="dot"></span><span id="indexStatus">Loading index…</span></div>
-      <button id="newChat" class="icon-btn" title="New chat (clear memory)" aria-label="New chat">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 5v14M5 12h14"></path>
-        </svg>
-      </button>
       <button id="openSettings" class="icon-btn" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -1264,7 +1259,6 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); }
     });
     $("send").addEventListener("click", run);
-    $("newChat").addEventListener("click", newChat);
     $("newChatSide").addEventListener("click", newChat);
     $("menuBtn").addEventListener("click", toggleSidebar);
     $("sidebarBackdrop").addEventListener("click", closeSidebar);
