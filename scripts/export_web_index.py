@@ -38,6 +38,7 @@ def main() -> None:
                 to_year,
                 COALESCE(geo_levels, '') AS geo,
                 COALESCE(temporal_levels, '') AS time,
+                COALESCE(source_link, '') AS source_link,
                 n_indicators,
                 n_dimensions
             FROM datasets
@@ -65,6 +66,8 @@ def main() -> None:
                 "years": years,
                 "geo": row["geo"],
                 "time": row["time"],
+                "url": f"https://ndap.niti.gov.in/dataset/{row['dataset_id']}",
+                "source": row["source_link"],
                 "nIndicators": row["n_indicators"],
                 "nDimensions": row["n_dimensions"],
             }
