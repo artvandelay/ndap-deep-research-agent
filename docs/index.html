@@ -1122,7 +1122,10 @@
     /* ---------- Agent reasoning (model calls; all return plain data) ---------- */
     // Compact prior-conversation block reused by every reasoning prompt.
     const convoBlock = (history) => (history ? `Conversation so far (for follow-up context):\n${history}\n\n` : "");
-    const slimCandidates = (list) => list.map((c) => ({ id: c.id, name: c.name, geo: c.geo, years: c.years, about: c.description }));
+    // "grain" is the dataset's true finest geographic level; "dims" are its real dimension
+    // names. These are reliable, unlike the legacy geo field (which mislabels non-geographic
+    // dimensions as city). The selector matches the question's geography against these.
+    const slimCandidates = (list) => list.map((c) => ({ id: c.id, name: c.name, grain: c.grain || "", dims: c.dims || [], years: c.years, about: c.description }));
 
     // Fast mode: one focused search query.
     async function planSearch(question, history) {
@@ -1180,7 +1183,7 @@
     async function selectDatasets(question, pool, alreadyHave, n, history) {
       const have = alreadyHave.length ? `Already downloaded: ${alreadyHave.join(", ")}. Pick only NEW datasets that add information still missing.\n` : "";
       const messages = [
-        { role: "system", content: `Choose the dataset(s) to DOWNLOAD that best answer the question — up to ${n}, but FEWER IS BETTER. A single dataset often answers the whole question (including breakdowns like by-sex or multiple years that live as rows/dimensions within ONE dataset); pick that one and stop. Only add more datasets when they genuinely supply data the first one(s) lack (a distinct measure that must be combined, e.g. rainfall AND crop production). Do NOT pad the list to reach the limit, and do NOT pick one dataset per phrase in the question. Use the prior conversation to keep the SAME topic on follow-ups. Prefer datasets whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. Match the geography/time the question needs, and MATCH THE GRAIN: for a national or state total, prefer a dataset already reported at that level (one row per country/state) over a highly granular one (town/ward/village/household level) — a national total cannot be reconstructed reliably by summing thousands of granular sub-rows that we only partially download. Avoid duplicating already-downloaded data. Return JSON only.` },
+        { role: "system", content: `Choose the dataset(s) to DOWNLOAD that best answer the question — up to ${n}, but FEWER IS BETTER. A single dataset often answers the whole question (including breakdowns like by-sex or multiple years that live as rows/dimensions within ONE dataset); pick that one and stop. Only add more datasets when they genuinely supply data the first one(s) lack (a distinct measure that must be combined, e.g. rainfall AND crop production). Do NOT pad the list to reach the limit, and do NOT pick one dataset per phrase in the question. Use the prior conversation to keep the SAME topic on follow-ups. Prefer datasets whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. GEOGRAPHY: each candidate has "grain" (its finest geographic level, e.g. Country / State / State, District) and "dims" (its actual dimension names). A dataset can ONLY answer for a place if its grain/dims can resolve that place — e.g. a question about a specific CITY (Mumbai, Kolkata) needs a city/town/ward dimension; a STATE question needs State in grain/dims; a national total wants a Country-grain dataset. Do NOT pick a Country-grain dataset for a city/state question just because its name mentions the topic — judge by grain and dims, not the title. If NO candidate has fine-enough grain to resolve the asked place, pick the closest available coarser-grain dataset (so the answer can honestly report what IS available with that caveat) rather than a mismatched one. Avoid duplicating already-downloaded data. Return JSON only.` },
         { role: "user", content: `${convoBlock(history)}${have}Current question:\n${question}\n\nCandidates:\n${JSON.stringify(slimCandidates(pool))}\n\nReturn exactly: {"dataset_ids":[<id>, ...],"reason":"..."}` },
       ];
       const fresh = (c) => !alreadyHave.includes(String(c.id));
@@ -1247,7 +1250,7 @@
       const kv = (k, v) => `<div class="kv"><b>${k}</b><span>${escapeHtml(v || "—")}</span></div>`;
       grid.innerHTML =
         kv("Sector", item.sector) + kv("Ministry", item.ministry) + kv("Years", item.years) +
-        kv("Geography", item.geo) + kv("Indicators", item.nIndicators) + kv("Dimensions", item.nDimensions);
+        kv("Grain", item.grain) + kv("Indicators", item.nIndicators) + kv("Dimensions", item.nDimensions);
       const wrap = el("div");
       wrap.appendChild(el("div", "tool-detail", escapeHtml(item.description || "No description")));
       wrap.style.margin = "2px 0 4px";
@@ -1368,14 +1371,27 @@
         }
       }
 
-      messages.push({ role: "user", content: "Now write the final grounded answer with the actual numbers, units, and year, citing each dataset by ID. Use markdown only — no LaTeX." });
-      try {
-        return await orStream(messages, 0, onDelta, maxOut);
-      } catch (_) {
-        const t = await orComplete(messages, 0, maxOut);
-        onDelta(t);
-        return t;
+      const ANSWER_ASK = "Now write the final grounded answer in markdown prose — actual numbers, units, year, and cite each dataset by ID. Do NOT reply with JSON or a fetch_rows request; just write the answer. Use markdown only — no LaTeX.";
+      const answer = async () => {
+        try { return await orStream(messages, 0, onDelta, maxOut); }
+        catch (_) { const t = await orComplete(messages, 0, maxOut); onDelta(t); return t; }
+      };
+      messages.push({ role: "user", content: ANSWER_ASK });
+      let finalText = await answer();
+
+      // Safety net: models occasionally emit a fetch request instead of answering.
+      // Honor it once (drill + re-answer) rather than showing raw JSON to the user.
+      const stray = anyHidden ? parseFetchRequest(finalText) : null;
+      if (stray) {
+        const ds = collected.find((c) => String(c.id) === String(stray.dataset)) || collected[0];
+        const got = drillRows(ds, stray);
+        liveStep(ui, "expand_rows", `dataset ${ds.id}: +${got.length} row${got.length === 1 ? "" : "s"} (final)`,
+          { payload: stray.reason || "" });
+        messages.push({ role: "assistant", content: finalText });
+        messages.push({ role: "user", content: `Rows for dataset ${ds.id} (${got.length}):\n${got.length ? rowsToCsv(ds.columns, got) : "(no rows matched that filter)"}\n\n${ANSWER_ASK}` });
+        finalText = await answer();
       }
+      return finalText;
     }
 
     function renderSources(ui, candidates) {

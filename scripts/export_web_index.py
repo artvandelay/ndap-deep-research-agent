@@ -36,7 +36,7 @@ def main() -> None:
                 COALESCE(ministry, '') AS ministry,
                 from_year,
                 to_year,
-                COALESCE(geo_levels, '') AS geo,
+                COALESCE(granularity, '') AS grain,
                 COALESCE(temporal_levels, '') AS time,
                 COALESCE(source_link, '') AS source_link,
                 n_indicators,
@@ -45,6 +45,24 @@ def main() -> None:
             ORDER BY dataset_id
             """
         ).fetchall()
+
+        # Real dimension display-names per dataset (the accurate grain signal). The
+        # geo_levels field is polluted (it tags non-geographic dims like "Type of
+        # area" as city), so the selector should rely on granularity + these names.
+        dim_rows = conn.execute(
+            """
+            SELECT dataset_id, display_name
+            FROM dimensions
+            WHERE COALESCE(display_name, '') <> ''
+            ORDER BY dataset_id, is_key_dimension DESC, dim_id
+            """
+        ).fetchall()
+    dims_by_ds: dict[int, list[str]] = {}
+    for dr in dim_rows:
+        seen = dims_by_ds.setdefault(dr["dataset_id"], [])
+        name = dr["display_name"].strip()
+        if name and name not in seen:
+            seen.append(name)
 
     items = []
     for row in rows:
@@ -64,7 +82,8 @@ def main() -> None:
                 "sector": row["sector"],
                 "ministry": row["ministry"],
                 "years": years,
-                "geo": row["geo"],
+                "grain": row["grain"],
+                "dims": dims_by_ds.get(row["dataset_id"], []),
                 "time": row["time"],
                 "url": f"https://ndap.niti.gov.in/dataset/{row['dataset_id']}",
                 "source": row["source_link"],

@@ -127,7 +127,7 @@ def search_pool(queries: list[str], mx: int):
 
 
 def slim(lst):
-    return [{"id": c["id"], "name": c["name"], "geo": c.get("geo"), "years": c.get("years"), "about": c["description"]} for c in lst]
+    return [{"id": c["id"], "name": c["name"], "grain": c.get("grain") or "", "dims": c.get("dims") or [], "years": c.get("years"), "about": c["description"]} for c in lst]
 
 
 def plan_search(model: str, question: str):
@@ -158,9 +158,14 @@ def plan_deep(model: str, question: str):
 def select_datasets(model: str, question: str, pool, already: list[str], n: int):
     have = f"Already downloaded: {', '.join(already)}. Pick only NEW datasets.\n" if already else ""
     grain = (
-        "MATCH THE GRAIN: for a national or state total, prefer a dataset already reported at that level "
-        "over a highly granular one — a national total cannot be reconstructed reliably by summing thousands "
-        "of granular sub-rows that we only partially download."
+        "GEOGRAPHY: each candidate has 'grain' (its finest geographic level, e.g. Country / State / State, District) "
+        "and 'dims' (its actual dimension names). A dataset can ONLY answer for a place if its grain/dims can resolve "
+        "that place — a CITY question (Mumbai, Kolkata) needs a city/town/ward dimension; a STATE question needs State "
+        "in grain/dims; a national total wants a Country-grain dataset. Do NOT pick a Country-grain dataset for a "
+        "city/state question just because its name mentions the topic — judge by grain and dims, not the title. If NO "
+        "candidate has fine-enough grain, pick the closest coarser-grain dataset so the answer can report what IS "
+        "available with a caveat. Also for a national/state total, prefer a dataset already reported at that level over "
+        "a highly granular one (a national total cannot be reconstructed by summing partially-downloaded sub-rows)."
     )
     msgs = [
         {"role": "system", "content": f"Choose up to {n} dataset(s) to DOWNLOAD — FEWER IS BETTER. {grain} Return JSON only."},
@@ -368,8 +373,19 @@ def synthesize_with_drilldown(model, question, collected):
             drills.append({"dataset": ds["id"], "where": req.get("where"), "more": req.get("more"), "rows": len(got), "reason": req.get("reason")})
             csv = to_csv(ds["columns"], got) if got else "(no rows matched that filter)"
             messages.append({"role": "user", "content": f"Rows for dataset {ds['id']} ({len(got)}):\n{csv}"})
-    messages.append({"role": "user", "content": "Now write the final grounded answer with actual numbers, units, and year, citing each dataset by ID. Use markdown only — no LaTeX."})
-    return chat(model, messages, 0, 3000), drills
+    answer_ask = "Now write the final grounded answer in markdown prose — actual numbers, units, year, citing each dataset by ID. Do NOT reply with JSON or a fetch_rows request; just write the answer. Use markdown only — no LaTeX."
+    messages.append({"role": "user", "content": answer_ask})
+    final = chat(model, messages, 0, 3000)
+    stray = parse_fetch_request(final) if any_hidden else None
+    if stray:
+        ds = next((c for c in collected if str(c["id"]) == str(stray.get("dataset"))), collected[0])
+        got = drill_rows(ds, stray)
+        drills.append({"dataset": ds["id"], "where": stray.get("where"), "more": stray.get("more"), "rows": len(got), "reason": stray.get("reason"), "phase": "final"})
+        csv = to_csv(ds["columns"], got) if got else "(no rows matched that filter)"
+        messages.append({"role": "assistant", "content": final})
+        messages.append({"role": "user", "content": f"Rows for dataset {ds['id']} ({len(got)}):\n{csv}\n\n{answer_ask}"})
+        final = chat(model, messages, 0, 3000)
+    return final, drills
 
 
 def gather_fast(model: str, question: str) -> dict:
@@ -446,11 +462,6 @@ def gather_deep(model: str, question: str) -> dict:
         trace["status"] = "metadata_only"
         trace["answer"] = chat(model, metadata_messages(question, slim(pool[:16])), 0, 2000)
     return trace
-
-
-def summarize_answer(text: str, n: int = 500) -> str:
-    t = re.sub(r"\s+", " ", (text or "").strip())
-    return t[:n] + ("…" if len(t) > n else "")
 
 
 def main():
