@@ -117,7 +117,7 @@
 
     /* Fast / Deep mode toggle (per chat) */
     .mode-toggle {
-      display: inline-flex; align-items: center; gap: 2px;
+      display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
       background: #eef1f6; border: 1px solid var(--line); border-radius: 999px; padding: 3px;
     }
     .mode-toggle button {
@@ -308,6 +308,15 @@
       background: linear-gradient(180deg, rgba(242,244,248,0), #f2f4f8 30%);
       padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
     }
+    .composer-tools {
+      max-width: 860px; margin: 0 auto 8px;
+      display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+      color: var(--faint); font-size: 11.5px;
+    }
+    .chat-mode-note {
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
     .composer {
       max-width: 860px; margin: 0 auto;
       border: 1px solid var(--line); border-radius: 20px;
@@ -386,6 +395,7 @@
     @media (max-width: 640px) {
       .thread { padding: 18px 14px 30px; }
       .composer-wrap { padding: 12px 14px; }
+      .composer-tools { justify-content: space-between; }
     }
   </style>
 </head>
@@ -418,16 +428,6 @@
         </div>
       </div>
       <div class="spacer"></div>
-      <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for this chat" title="Mode for this chat">
-        <button type="button" data-mode="fast" class="active">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
-          Fast
-        </button>
-        <button type="button" data-mode="deep">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-          Deep
-        </button>
-      </div>
       <div id="indexPill" class="pill"><span class="dot"></span><span id="indexStatus">Loading index…</span></div>
       <button id="openSettings" class="icon-btn" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -463,6 +463,19 @@
     </div>
 
     <div class="composer-wrap">
+      <div class="composer-tools">
+        <span class="chat-mode-note">Mode for this chat</span>
+        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for this chat" title="Mode for this chat">
+          <button type="button" data-mode="fast" class="active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
+            Fast
+          </button>
+          <button type="button" data-mode="deep">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+            Deep
+          </button>
+        </div>
+      </div>
       <div class="composer">
         <textarea id="input" rows="1" placeholder="Ask about NDAP datasets…"></textarea>
         <button id="send" class="send" title="Send" aria-label="Send">
@@ -471,7 +484,7 @@
           </svg>
         </button>
       </div>
-      <div class="composer-hint">Enter to send · Shift+Enter for newline · Key &amp; model live in Settings (top-right)</div>
+      <div class="composer-hint">Enter to send · Shift+Enter for newline · Fast/Deep is saved per chat · Key &amp; model live in Settings (top-right)</div>
     </div>
   </div>
   </div>
