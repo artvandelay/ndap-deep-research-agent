@@ -8,19 +8,20 @@
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <style>
     :root {
-      color-scheme: dark;
-      --bg: #05070a;
-      --panel: rgba(10, 15, 21, 0.82);
-      --panel-2: rgba(17, 26, 37, 0.9);
-      --line: #1f2b3a;
-      --line-soft: rgba(255, 255, 255, 0.06);
-      --text: #e8eef6;
-      --muted: #8da0b6;
-      --faint: #5f7186;
-      --gold: #f8d66d;
-      --green: #7ee787;
-      --blue: #8ab4f8;
-      --danger: #ff8a80;
+      color-scheme: light;
+      --bg: #f2f4f8;
+      --panel: #ffffff;
+      --panel-2: #ffffff;
+      --line: #e2e4e7;
+      --line-soft: rgba(25, 44, 109, 0.07);
+      --text: #1c2433;
+      --muted: #5b6573;
+      --faint: #8b94a3;
+      --gold: #2e5cf6;       /* NDAP primary blue (brand accent) */
+      --navy: #192c6d;
+      --green: #1f9d57;
+      --blue: #2e5cf6;
+      --danger: #d4351c;
       --radius: 16px;
     }
 
@@ -29,9 +30,9 @@
     body {
       margin: 0;
       background:
-        radial-gradient(1200px 600px at 12% -10%, #18222f 0, rgba(11,15,20,0) 55%),
-        radial-gradient(900px 500px at 100% 0, #131c27 0, rgba(5,7,10,0) 50%),
-        #05070a;
+        radial-gradient(1100px 520px at 12% -12%, #e9edff 0, rgba(242,244,248,0) 55%),
+        radial-gradient(900px 480px at 100% 0, #eaf6ef 0, rgba(242,244,248,0) 50%),
+        #f2f4f8;
       color: var(--text);
       font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
       -webkit-font-smoothing: antialiased;
@@ -50,7 +51,7 @@
       gap: 14px;
       padding: 14px 20px;
       border-bottom: 1px solid var(--line);
-      background: rgba(5, 8, 13, 0.72);
+      background: rgba(255, 255, 255, 0.82);
       backdrop-filter: blur(10px);
       position: sticky;
       top: 0;
@@ -59,9 +60,9 @@
     .brand { display: flex; align-items: center; gap: 11px; min-width: 0; }
     .glyph {
       width: 30px; height: 30px; border-radius: 9px;
-      background: linear-gradient(135deg, #f8d66d, #c8902a);
-      display: grid; place-items: center; color: #160f04; font-weight: 900;
-      box-shadow: 0 6px 20px rgba(248, 214, 109, 0.25);
+      background: linear-gradient(135deg, #2e5cf6, #192c6d);
+      display: grid; place-items: center; color: #ffffff; font-weight: 900;
+      box-shadow: 0 6px 18px rgba(46, 92, 246, 0.30);
       flex: 0 0 auto;
     }
     .brand h1 {
@@ -73,20 +74,20 @@
       display: inline-flex; align-items: center; gap: 7px;
       font-size: 12px; color: var(--muted);
       border: 1px solid var(--line); border-radius: 999px;
-      padding: 6px 11px; background: rgba(255,255,255,0.02);
+      padding: 6px 11px; background: #fff;
       white-space: nowrap;
     }
     .pill .dot { width: 8px; height: 8px; border-radius: 999px; background: var(--faint); }
-    .pill.ok .dot { background: var(--green); box-shadow: 0 0 12px rgba(126,231,135,.7); }
-    .pill.warn .dot { background: var(--gold); box-shadow: 0 0 12px rgba(248,214,109,.7); }
+    .pill.ok .dot { background: var(--green); box-shadow: 0 0 10px rgba(31,157,87,.5); }
+    .pill.warn .dot { background: #e8a33d; box-shadow: 0 0 10px rgba(232,163,61,.5); }
 
     .icon-btn {
       width: 38px; height: 38px; border-radius: 11px;
-      border: 1px solid var(--line); background: rgba(255,255,255,0.02);
-      color: var(--text); cursor: pointer; display: grid; place-items: center;
-      transition: border-color .15s, background .15s;
+      border: 1px solid var(--line); background: #fff;
+      color: var(--navy); cursor: pointer; display: grid; place-items: center;
+      transition: border-color .15s, background .15s, color .15s;
     }
-    .icon-btn:hover { border-color: #34465f; background: rgba(255,255,255,0.05); }
+    .icon-btn:hover { border-color: var(--blue); color: var(--blue); background: #f5f8ff; }
     .icon-btn svg { width: 18px; height: 18px; }
 
     /* Conversation */
@@ -108,7 +109,7 @@
     .welcome { text-align: center; padding: 8vh 8px 4vh; }
     .welcome .big {
       font-size: clamp(26px, 4vw, 40px); letter-spacing: -0.03em; margin: 0 0 10px;
-      background: linear-gradient(180deg, #fff, #9fb2c8);
+      background: linear-gradient(120deg, #192c6d, #2e5cf6);
       -webkit-background-clip: text; background-clip: text; color: transparent;
     }
     .welcome p { color: var(--muted); max-width: 560px; margin: 0 auto 26px; line-height: 1.6; }
@@ -117,9 +118,10 @@
       border: 1px solid var(--line); background: var(--panel);
       color: var(--text); border-radius: 12px; padding: 11px 14px; font-size: 13.5px;
       cursor: pointer; text-align: left; max-width: 360px; line-height: 1.35;
-      transition: border-color .15s, transform .1s;
+      box-shadow: 0 1px 2px rgba(25,44,109,.04);
+      transition: border-color .15s, transform .1s, box-shadow .15s;
     }
-    .chip:hover { border-color: #3a4d66; transform: translateY(-1px); }
+    .chip:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(46,92,246,.10); }
 
     /* Messages */
     .msg { display: flex; gap: 12px; }
@@ -127,12 +129,12 @@
       flex: 0 0 auto; width: 30px; height: 30px; border-radius: 9px;
       display: grid; place-items: center; font-size: 12px; font-weight: 800; margin-top: 2px;
     }
-    .msg.user .av { background: #21303f; color: #cfe0f3; }
-    .msg.bot .av { background: linear-gradient(135deg, #f8d66d, #c8902a); color: #160f04; }
+    .msg.user .av { background: #e7edff; color: var(--navy); }
+    .msg.bot .av { background: linear-gradient(135deg, #2e5cf6, #192c6d); color: #fff; }
     .msg .body { min-width: 0; flex: 1; }
     .msg .who { font-size: 12px; color: var(--faint); margin: 4px 0 6px; font-weight: 600; letter-spacing: .02em; }
     .msg.user .text {
-      background: var(--panel-2); border: 1px solid #2b3c50;
+      background: #f5f8ff; border: 1px solid #dbe4ff;
       border-radius: 14px; padding: 12px 14px; line-height: 1.55; white-space: pre-wrap;
     }
 
@@ -140,6 +142,7 @@
     details.block {
       border: 1px solid var(--line); border-radius: 13px;
       background: var(--panel); margin: 0 0 12px; overflow: hidden;
+      box-shadow: 0 1px 2px rgba(25,44,109,.04);
     }
     details.block > summary {
       list-style: none; cursor: pointer; user-select: none;
@@ -163,16 +166,17 @@
       padding: 8px 0; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px;
     }
     details.step > summary::-webkit-details-marker { display: none; }
-    .tool-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--gold); box-shadow: 0 0 10px rgba(248,214,109,.6); flex: 0 0 auto; align-self: center; }
-    .tool-dot.run { background: var(--blue); box-shadow: 0 0 10px rgba(138,180,248,.7); animation: pulse 1s infinite; }
-    .tool-dot.done { background: var(--green); box-shadow: 0 0 10px rgba(126,231,135,.6); }
+    .tool-dot { width: 8px; height: 8px; border-radius: 999px; background: var(--navy); flex: 0 0 auto; align-self: center; }
+    .tool-dot.run { background: var(--blue); box-shadow: 0 0 10px rgba(46,92,246,.5); animation: pulse 1s infinite; }
+    .tool-dot.done { background: var(--green); box-shadow: 0 0 8px rgba(31,157,87,.4); }
     @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
     .tool-name { color: var(--gold); font-weight: 700; }
-    .tool-detail { color: #aebfd2; overflow-wrap: anywhere; }
+    .tool-detail { color: var(--muted); overflow-wrap: anywhere; }
     .tool-time { margin-left: auto; color: var(--faint); }
     .step .payload {
       margin: 2px 0 10px 18px; padding: 10px 12px;
-      border-left: 2px solid var(--line); color: #9fb1c6;
+      border-left: 2px solid var(--line); color: var(--muted);
+      background: #f7f9fc; border-radius: 0 8px 8px 0;
       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px;
       white-space: pre-wrap; overflow-wrap: anywhere;
     }
@@ -190,50 +194,50 @@
       margin: 4px 0 10px 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px,1fr));
       gap: 8px;
     }
-    .kv { background: rgba(255,255,255,.02); border: 1px solid var(--line-soft); border-radius: 9px; padding: 8px 10px; }
+    .kv { background: #f7f9fc; border: 1px solid var(--line); border-radius: 9px; padding: 8px 10px; }
     .kv b { display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); margin-bottom: 3px; font-weight: 700; }
-    .kv span { font-size: 12.5px; color: #cdd9e7; }
+    .kv span { font-size: 12.5px; color: var(--text); }
 
     /* answer markdown */
     .answer { line-height: 1.62; font-size: 14.5px; }
     .answer > *:first-child { margin-top: 0; }
     .answer > *:last-child { margin-bottom: 0; }
     .answer h1,.answer h2,.answer h3 { letter-spacing: -0.01em; }
-    .answer code { background: rgba(255,255,255,.06); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
-    .answer pre { background: #070b10; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; overflow: auto; }
+    .answer code { background: rgba(25,44,109,.07); padding: 1px 6px; border-radius: 6px; font-size: 13px; }
+    .answer pre { background: #f4f6fb; border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; overflow: auto; }
     .answer pre code { background: none; padding: 0; }
     .answer table { border-collapse: collapse; width: 100%; margin: 12px 0; font-size: 13.5px; }
     .answer th, .answer td { border: 1px solid var(--line); padding: 7px 10px; text-align: left; }
-    .answer th { background: rgba(255,255,255,.03); }
+    .answer th { background: #f0f4ff; color: var(--navy); }
     .answer a { color: var(--blue); }
-    .answer blockquote { border-left: 3px solid var(--line); margin: 10px 0; padding: 2px 14px; color: var(--muted); }
+    .answer blockquote { border-left: 3px solid var(--blue); margin: 10px 0; padding: 2px 14px; color: var(--muted); }
     .cursor::after { content: "▍"; color: var(--gold); animation: blink 1s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
 
     .answer-tools { display: flex; gap: 8px; margin-top: 10px; }
     .ghost {
-      border: 1px solid var(--line); background: transparent; color: var(--muted);
+      border: 1px solid var(--line); background: #fff; color: var(--muted);
       border-radius: 9px; padding: 6px 11px; font-size: 12px; cursor: pointer;
     }
-    .ghost:hover { color: var(--text); border-color: #34465f; }
-    .err { color: var(--danger); border:1px solid rgba(255,138,128,.35); background: rgba(255,138,128,.08); border-radius: 12px; padding: 12px 14px; }
+    .ghost:hover { color: var(--blue); border-color: var(--blue); }
+    .err { color: var(--danger); border:1px solid rgba(212,53,28,.3); background: rgba(212,53,28,.06); border-radius: 12px; padding: 12px 14px; }
 
     /* Composer */
     .composer-wrap {
       border-top: 1px solid var(--line);
-      background: linear-gradient(180deg, rgba(5,7,10,0), rgba(5,7,10,.85) 30%);
+      background: linear-gradient(180deg, rgba(242,244,248,0), #f2f4f8 30%);
       padding: 14px 20px calc(14px + env(safe-area-inset-bottom));
     }
     .composer {
       max-width: 860px; margin: 0 auto;
       border: 1px solid var(--line); border-radius: 20px;
-      background: var(--panel-2);
-      box-shadow: 0 14px 50px rgba(0,0,0,.4);
+      background: #fff;
+      box-shadow: 0 10px 36px rgba(25,44,109,.10);
       padding: 8px 8px 8px 16px;
       display: flex; align-items: flex-end; gap: 10px;
       transition: border-color .15s, box-shadow .15s;
     }
-    .composer:focus-within { border-color: #3a5170; box-shadow: 0 18px 60px rgba(0,0,0,.5), 0 0 0 3px rgba(138,180,248,.1); }
+    .composer:focus-within { border-color: var(--blue); box-shadow: 0 14px 44px rgba(25,44,109,.14), 0 0 0 3px rgba(46,92,246,.12); }
     .composer textarea {
       flex: 1; border: 0; outline: 0; resize: none; background: transparent; color: var(--text);
       font: inherit; line-height: 1.5; max-height: 200px; padding: 9px 0; min-height: 24px;
@@ -241,7 +245,7 @@
     .composer textarea::placeholder { color: var(--faint); }
     .send {
       flex: 0 0 auto; width: 40px; height: 40px; border-radius: 13px; border: 0; cursor: pointer;
-      background: linear-gradient(135deg, #f8d66d, #d29d2f); color: #160f04;
+      background: linear-gradient(135deg, #2e5cf6, #1e46d2); color: #fff;
       display: grid; place-items: center; transition: transform .1s, opacity .15s;
     }
     .send:hover { transform: translateY(-1px); }
@@ -251,13 +255,14 @@
 
     /* Settings drawer */
     .backdrop {
-      position: fixed; inset: 0; background: rgba(2,4,7,.6); backdrop-filter: blur(3px);
+      position: fixed; inset: 0; background: rgba(25,44,109,.35); backdrop-filter: blur(3px);
       opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 40;
     }
     .backdrop.open { opacity: 1; pointer-events: auto; }
     .drawer {
       position: fixed; top: 0; right: 0; height: 100%; width: min(420px, 92vw);
-      background: #0a0f15; border-left: 1px solid var(--line); z-index: 50;
+      background: #ffffff; border-left: 1px solid var(--line); z-index: 50;
+      box-shadow: -16px 0 50px rgba(25,44,109,.12);
       transform: translateX(100%); transition: transform .24s ease;
       display: flex; flex-direction: column;
     }
@@ -269,19 +274,19 @@
     .drawer label:first-child { margin-top: 0; }
     .field {
       display: flex; align-items: center; gap: 8px;
-      border: 1px solid var(--line); border-radius: 12px; background: #070b10; padding: 0 10px 0 12px;
+      border: 1px solid var(--line); border-radius: 12px; background: #f7f9fc; padding: 0 10px 0 12px;
     }
-    .field:focus-within { border-color: var(--blue); }
+    .field:focus-within { border-color: var(--blue); background: #fff; }
     .field input {
       flex: 1; border: 0; outline: 0; background: transparent; color: var(--text); font: inherit; padding: 12px 0;
     }
     .field .mini { border:0; background:transparent; color: var(--faint); cursor:pointer; font-size:12px; padding:6px; }
-    .field .mini:hover { color: var(--text); }
+    .field .mini:hover { color: var(--blue); }
     .help { font-size: 11.5px; color: var(--faint); margin: 7px 2px 0; line-height: 1.5; }
     .drawer .actions { margin-top: 24px; display: flex; gap: 10px; }
-    .btn-primary { flex:1; border:0; border-radius:12px; background: linear-gradient(135deg,#f8d66d,#d29d2f); color:#160f04; font-weight:800; padding:12px; cursor:pointer; }
-    .btn-secondary { border:1px solid var(--line); border-radius:12px; background:transparent; color:var(--muted); padding:12px 14px; cursor:pointer; }
-    .btn-secondary:hover { color: var(--text); border-color:#34465f; }
+    .btn-primary { flex:1; border:0; border-radius:12px; background: linear-gradient(135deg,#2e5cf6,#1e46d2); color:#fff; font-weight:800; padding:12px; cursor:pointer; }
+    .btn-secondary { border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--muted); padding:12px 14px; cursor:pointer; }
+    .btn-secondary:hover { color: var(--blue); border-color: var(--blue); }
     .saved-flash { font-size:12px; color: var(--green); margin-top:10px; height:14px; }
 
     @media (max-width: 640px) {
@@ -813,7 +818,7 @@
 
         // 4) optionally download real rows through the proxy
         const metadataMessages = () => ([
-          { role: "system", content: "You are an NDAP-only research assistant. Answer using ONLY the supplied NDAP metadata. Use prior conversation only to interpret the question. Cite dataset IDs. Use markdown. Do not invent raw values, causal claims, or future predictions. If raw data is needed for a number, say which dataset to download next." },
+          { role: "system", content: "You are an NDAP-only research assistant for India's National Data and Analytics Platform. Answer using ONLY the supplied NDAP metadata; use prior conversation only to interpret the question. Cite every dataset you rely on by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>, and also include the dataset's source URL if one is present in the supplied metadata. If you cannot point to a deterministic source (dataset ID or URL) for a statement, withhold it or label it 'Low Confidence / Unverified'. If your answer spans multiple datasets or relies on inferred values, tag those statements with a caveat and state key assumptions in plain language a non-technical reader can follow. Do not invent raw values. Do not make causal or driver claims or future predictions. Reply in the user's language. If NDAP evidence is insufficient, say so and name the dataset to download next. Use markdown." },
           { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
         ]);
 
@@ -844,7 +849,7 @@
               `columns: ${columns.join(", ")}\n\n${csv.split("\n").slice(0, 12).join("\n")}${used.length > 11 ? "\n…" : ""}`));
             scrollDown();
             messages = [
-              { role: "system", content: "You are an NDAP-only data analyst. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset. Use prior conversation only to interpret the question. Cite the dataset ID, show the exact numbers you used (a small markdown table is ideal), and state the units/year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly." },
+              { role: "system", content: "You are an NDAP-only data analyst for India's National Data and Analytics Platform. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset; use prior conversation only to interpret the question. Cite the dataset by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (a small markdown table is ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly and label it 'Low Confidence / Unverified'. If you had to combine, derive, or assume anything, flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal claims or future predictions. Reply in the user's language." },
               { role: "user", content: `${histPreamble}Current question:\n${question}\n\nDataset ${pick.id} — ${pick.name}\nColumns: ${columns.join(", ")}\nRows provided: ${used.length}${rows.length > used.length ? ` (most relevant of ${rows.length}${truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${csv}\n\nAnswer with the actual numbers.` },
             ];
           } catch (dataErr) {
@@ -864,9 +869,9 @@
         ui.answer.classList.add("cursor");
         let finalText = "";
         try {
-          finalText = await orStream(messages, 0.2, (full) => { ui.answer.innerHTML = renderMarkdown(full); scrollDown(); });
+          finalText = await orStream(messages, 0, (full) => { ui.answer.innerHTML = renderMarkdown(full); scrollDown(); });
         } catch (streamErr) {
-          finalText = await orComplete(messages, 0.2);
+          finalText = await orComplete(messages, 0);
           ui.answer.innerHTML = renderMarkdown(finalText);
         }
         ui.answer.classList.remove("cursor");
