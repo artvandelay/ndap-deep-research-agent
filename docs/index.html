@@ -38,11 +38,45 @@
       -webkit-font-smoothing: antialiased;
     }
 
+    .shell { display: flex; height: 100dvh; }
     .app {
+      flex: 1; min-width: 0;
       display: flex;
       flex-direction: column;
       height: 100dvh;
     }
+
+    /* Sidebar */
+    .sidebar {
+      width: 268px; flex: 0 0 268px;
+      background: #fff; border-right: 1px solid var(--line);
+      display: flex; flex-direction: column; min-height: 0;
+    }
+    .sidebar-head { padding: 14px; border-bottom: 1px solid var(--line); }
+    .sidebar-brand { display: flex; align-items: center; gap: 9px; margin: 2px 2px 12px; }
+    .sidebar-brand .glyph { width: 26px; height: 26px; border-radius: 8px; font-size: 13px; }
+    .sidebar-brand span { font-weight: 800; font-size: 14px; letter-spacing: -0.01em; color: var(--navy); }
+    .new-chat-btn {
+      width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px;
+      border: 1px solid var(--line); background: #fff; color: var(--navy); font: inherit; font-weight: 700; font-size: 13.5px;
+      border-radius: 11px; padding: 10px; cursor: pointer; transition: border-color .15s, color .15s, background .15s;
+    }
+    .new-chat-btn:hover { border-color: var(--blue); color: var(--blue); background: #f5f8ff; }
+    .new-chat-btn svg { width: 16px; height: 16px; }
+    .chat-list { flex: 1; overflow-y: auto; padding: 8px; }
+    .chat-group-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: .06em; color: var(--faint); font-weight: 700; padding: 12px 8px 5px; }
+    .chat-item { display: flex; align-items: center; gap: 8px; padding: 9px 10px; border-radius: 9px; cursor: pointer; color: var(--text); font-size: 13px; line-height: 1.3; }
+    .chat-item:hover { background: #f2f5fb; }
+    .chat-item.active { background: #e9efff; color: var(--navy); font-weight: 600; }
+    .chat-item .ci-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .chat-item .ci-del { opacity: 0; border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 3px; border-radius: 6px; flex: 0 0 auto; display: grid; place-items: center; transition: opacity .15s; }
+    .chat-item:hover .ci-del, .chat-item.active .ci-del { opacity: 1; }
+    .chat-item .ci-del:hover { color: var(--danger); background: rgba(212,53,28,.08); }
+    .chat-item .ci-del svg { width: 14px; height: 14px; }
+    .chat-empty { color: var(--faint); font-size: 12.5px; padding: 16px 10px; text-align: center; line-height: 1.5; }
+
+    .menu-btn { display: none; }
+    .sidebar-backdrop { display: none; }
 
     /* Header */
     header {
@@ -319,6 +353,20 @@
     .btn-secondary:hover { color: var(--blue); border-color: var(--blue); }
     .saved-flash { font-size:12px; color: var(--green); margin-top:10px; height:14px; }
 
+    @media (max-width: 860px) {
+      .menu-btn { display: grid; }
+      .sidebar {
+        position: fixed; top: 0; left: 0; bottom: 0; z-index: 60;
+        transform: translateX(-100%); transition: transform .24s ease;
+        box-shadow: 8px 0 40px rgba(25,44,109,.14);
+      }
+      .sidebar.open { transform: translateX(0); }
+      .sidebar-backdrop {
+        display: block; position: fixed; inset: 0; background: rgba(25,44,109,.35); backdrop-filter: blur(3px);
+        opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 55;
+      }
+      .sidebar-backdrop.open { opacity: 1; pointer-events: auto; }
+    }
     @media (max-width: 640px) {
       .thread { padding: 18px 14px 30px; }
       .composer-wrap { padding: 12px 14px; }
@@ -326,8 +374,26 @@
   </style>
 </head>
 <body>
+  <div class="shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="sidebar-head">
+        <div class="sidebar-brand">
+          <div class="glyph">N</div>
+          <span>NDAP Research</span>
+        </div>
+        <button class="new-chat-btn" id="newChatSide" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
+          New chat
+        </button>
+      </div>
+      <div class="chat-list" id="chatList"></div>
+    </aside>
+
   <div class="app">
     <header>
+      <button id="menuBtn" class="icon-btn menu-btn" title="Chats" aria-label="Toggle chat list">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M3 12h18M3 18h18"></path></svg>
+      </button>
       <div class="brand">
         <div class="glyph">N</div>
         <div>
@@ -387,6 +453,8 @@
       <div class="composer-hint">Enter to send · Shift+Enter for newline · Key &amp; model live in Settings (top-right)</div>
     </div>
   </div>
+  </div>
+  <div class="sidebar-backdrop" id="sidebarBackdrop"></div>
 
   <!-- Settings -->
   <div class="backdrop" id="backdrop"></div>
@@ -433,9 +501,10 @@
 
   <script>
     const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy", history: "ndap.history" };
-    const MAX_SAVED_TURNS = 40;        // how many Q&A pairs to keep on disk
+    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy", history: "ndap.history", chats: "ndap.chats" };
+    const MAX_SAVED_TURNS = 40;        // how many Q&A pairs to keep per chat on disk
     const MAX_SAVED_ANSWER_CHARS = 12000;
+    const MAX_CHATS = 50;              // how many conversations to keep
     const DEFAULT_MODEL = "openai/gpt-5.5";
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
@@ -449,8 +518,10 @@
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
     let busy = false;
-    let convo = [];               // compressed multi-turn memory (for model context)
-    let transcript = [];          // full Q&A pairs (for on-screen history, persisted)
+    let chats = [];               // all conversations [{id,title,createdAt,updatedAt,convo,transcript}]
+    let currentChatId = null;
+    let convo = [];               // compressed multi-turn memory of current chat (model context)
+    let transcript = [];          // full Q&A pairs of current chat (on-screen history)
 
     const settings = {
       get key() { return localStorage.getItem(LS.key) || ""; },
@@ -654,33 +725,156 @@
     }
 
     function rememberTurn(question, datasetLabel, answer) {
+      const cc = currentChat();
+      if (!cc) return;
       const full = (answer || "").trim();
       const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
-      convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
-      if (convo.length > MAX_TURNS * 2) convo = convo.slice(-MAX_TURNS * 2);
-      transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS) });
-      if (transcript.length > MAX_SAVED_TURNS) transcript = transcript.slice(-MAX_SAVED_TURNS);
-      saveHistory();
+      cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
+      if (cc.convo.length > MAX_TURNS * 2) cc.convo = cc.convo.slice(-MAX_TURNS * 2);
+      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS) });
+      if (cc.transcript.length > MAX_SAVED_TURNS) cc.transcript = cc.transcript.slice(-MAX_SAVED_TURNS);
+      convo = cc.convo; transcript = cc.transcript;
+      if (!cc.title && cc.transcript.length) cc.title = titleFromQuestion(question);
+      cc.updatedAt = Date.now();
+      saveChats();
+      renderChatList();
     }
 
-    function saveHistory() {
-      try { localStorage.setItem(LS.history, JSON.stringify({ convo, transcript })); } catch (e) { /* quota — skip */ }
+    /* ---------- Conversation store (multi-chat, persisted) ---------- */
+    function titleFromQuestion(q) {
+      const t = String(q || "").replace(/\s+/g, " ").trim();
+      return t.length > 48 ? t.slice(0, 48) + "…" : (t || "New chat");
     }
-    function clearHistory() {
-      convo = []; transcript = [];
-      try { localStorage.removeItem(LS.history); } catch (e) {}
+    function newChatObject() {
+      return { id: (crypto.randomUUID ? crypto.randomUUID() : "c" + Date.now() + Math.random().toString(16).slice(2)), title: "", createdAt: Date.now(), updatedAt: Date.now(), convo: [], transcript: [] };
     }
-    function restoreHistory() {
-      let saved = null;
-      try { saved = JSON.parse(localStorage.getItem(LS.history) || "null"); } catch (e) {}
-      if (!saved || !Array.isArray(saved.transcript) || !saved.transcript.length) return false;
-      convo = Array.isArray(saved.convo) ? saved.convo : [];
-      transcript = saved.transcript;
-      $("welcome")?.remove();
-      for (const t of transcript) { addUser(t.q); addRestoredAnswer(t.a); }
+    function currentChat() { return chats.find((c) => c.id === currentChatId) || null; }
+    function saveChats() {
+      try { localStorage.setItem(LS.chats, JSON.stringify({ currentChatId, chats: chats.slice(0, MAX_CHATS) })); } catch (e) { /* quota — skip */ }
+    }
+    function loadChats() {
+      let data = null;
+      try { data = JSON.parse(localStorage.getItem(LS.chats) || "null"); } catch (e) {}
+      if (data && Array.isArray(data.chats)) {
+        chats = data.chats.map((c) => ({ convo: [], transcript: [], title: "", ...c }));
+        currentChatId = data.currentChatId || (chats[0] && chats[0].id) || null;
+      } else {
+        // migrate the old single-conversation history, if any
+        let legacy = null;
+        try { legacy = JSON.parse(localStorage.getItem(LS.history) || "null"); } catch (e) {}
+        if (legacy && Array.isArray(legacy.transcript) && legacy.transcript.length) {
+          const c = newChatObject();
+          c.convo = Array.isArray(legacy.convo) ? legacy.convo : [];
+          c.transcript = legacy.transcript;
+          c.title = titleFromQuestion(legacy.transcript[0].q);
+          chats = [c]; currentChatId = c.id;
+          try { localStorage.removeItem(LS.history); } catch (e) {}
+        } else {
+          chats = []; currentChatId = null;
+        }
+      }
+      if (!currentChat()) {
+        const c = newChatObject();
+        chats.unshift(c); currentChatId = c.id;
+      }
+      const cc = currentChat();
+      convo = cc.convo; transcript = cc.transcript;
+      saveChats();
+    }
+    function newChat() {
+      if (busy) return;
+      const cc = currentChat();
+      // reuse an already-empty current chat instead of stacking blanks
+      if (cc && cc.transcript.length === 0) { currentChatId = cc.id; }
+      else {
+        const c = newChatObject();
+        chats.unshift(c); currentChatId = c.id;
+        if (chats.length > MAX_CHATS) chats = chats.slice(0, MAX_CHATS);
+      }
+      convo = currentChat().convo; transcript = currentChat().transcript;
+      saveChats();
+      renderThread();
+      renderChatList();
+      closeSidebar();
+      $("input").focus();
+    }
+    function switchChat(id) {
+      if (busy || id === currentChatId) { closeSidebar(); return; }
+      const c = chats.find((x) => x.id === id);
+      if (!c) return;
+      currentChatId = id;
+      convo = c.convo; transcript = c.transcript;
+      saveChats();
+      renderThread();
+      renderChatList();
+      closeSidebar();
+    }
+    function deleteChat(id) {
+      const idx = chats.findIndex((c) => c.id === id);
+      if (idx < 0) return;
+      chats.splice(idx, 1);
+      if (id === currentChatId) {
+        if (!chats.length) chats.unshift(newChatObject());
+        currentChatId = chats[0].id;
+        const cc = currentChat();
+        convo = cc.convo; transcript = cc.transcript;
+        renderThread();
+      }
+      saveChats();
+      renderChatList();
+    }
+    function renderThread() {
+      const thread = $("thread");
+      const cc = currentChat();
+      if (!cc || !cc.transcript.length) {
+        thread.innerHTML = WELCOME_HTML;
+        renderChips();
+        bindWelcomeKey();
+        refreshKeyPill();
+        return;
+      }
+      thread.innerHTML = "";
+      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.a); }
       scrollDown();
-      return true;
     }
+
+    function groupLabel(ts) {
+      const now = new Date(); const d = new Date(ts);
+      const startOf = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const days = Math.round((startOf(now) - startOf(d)) / 86400000);
+      if (days <= 0) return "Today";
+      if (days === 1) return "Yesterday";
+      if (days < 7) return "Previous 7 days";
+      if (days < 30) return "Previous 30 days";
+      return "Older";
+    }
+    function renderChatList() {
+      const box = $("chatList");
+      if (!box) return;
+      box.innerHTML = "";
+      const visible = chats.filter((c) => c.transcript.length || c.id === currentChatId);
+      if (!visible.length) { box.appendChild(el("div", "chat-empty", "No conversations yet.<br>Start by asking a question.")); return; }
+      const ordered = [...visible].sort((a, b) => b.updatedAt - a.updatedAt);
+      let lastGroup = "";
+      for (const c of ordered) {
+        const g = groupLabel(c.updatedAt);
+        if (g !== lastGroup) { box.appendChild(el("div", "chat-group-label", g)); lastGroup = g; }
+        const item = el("div", "chat-item" + (c.id === currentChatId ? " active" : ""));
+        const title = el("div", "ci-title", escapeHtml(c.title || "New chat"));
+        item.appendChild(title);
+        const del = el("button", "ci-del", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"></path></svg>');
+        del.title = "Delete chat";
+        del.onclick = (e) => { e.stopPropagation(); deleteChat(c.id); };
+        item.appendChild(del);
+        item.onclick = () => switchChat(c.id);
+        box.appendChild(item);
+      }
+    }
+
+    function openSidebar() { $("sidebar").classList.add("open"); $("sidebarBackdrop").classList.add("open"); }
+    function closeSidebar() { $("sidebar").classList.remove("open"); $("sidebarBackdrop").classList.remove("open"); }
+    function toggleSidebar() { $("sidebar").classList.contains("open") ? closeSidebar() : openSidebar(); }
+
     function addRestoredAnswer(markdownText) {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
@@ -915,6 +1109,10 @@
       addUser(question);
       const ui = addAssistant();
 
+      // surface this chat in the sidebar right away (title from first question)
+      const cc0 = currentChat();
+      if (cc0 && !cc0.title) { cc0.title = titleFromQuestion(question); cc0.updatedAt = Date.now(); saveChats(); renderChatList(); }
+
       const history = compressedHistory();
       let usedDataset = "";
       try {
@@ -1054,15 +1252,6 @@
       const wak = $("welcomeAddKey");
       if (wak) wak.addEventListener("click", openDrawer);
     }
-    function resetChat() {
-      if (busy) return;
-      clearHistory();
-      $("thread").innerHTML = WELCOME_HTML;
-      renderChips();
-      bindWelcomeKey();
-      refreshKeyPill();
-      $("input").focus();
-    }
 
     function autoGrow() {
       const t = $("input");
@@ -1075,7 +1264,10 @@
       if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); }
     });
     $("send").addEventListener("click", run);
-    $("newChat").addEventListener("click", resetChat);
+    $("newChat").addEventListener("click", newChat);
+    $("newChatSide").addEventListener("click", newChat);
+    $("menuBtn").addEventListener("click", toggleSidebar);
+    $("sidebarBackdrop").addEventListener("click", closeSidebar);
 
     $("openSettings").addEventListener("click", openDrawer);
     bindWelcomeKey();
@@ -1087,11 +1279,12 @@
       const k = $("key"); const t = $("toggleKey");
       if (k.type === "password") { k.type = "text"; t.textContent = "hide"; } else { k.type = "password"; t.textContent = "show"; }
     });
-    document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape") { closeDrawer(); closeSidebar(); } });
 
     const WELCOME_HTML = $("thread").innerHTML;
-    renderChips();
-    restoreHistory();
+    loadChats();
+    renderThread();
+    renderChatList();
     loadIndex().catch((err) => {
       $("indexPill").className = "pill warn";
       $("indexStatus").textContent = "index failed";
