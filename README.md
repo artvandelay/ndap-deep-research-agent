@@ -15,7 +15,9 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. It includes a multi-conversation sidebar with saved chat history, per-query cost/token accounting, and a visible agent trace (plan → search → retrieve → download → synthesize).
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each chat runs in one of two modes via a per-chat **Fast / Deep** toggle, and shows a visible agent trace. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
+  - **Fast**: a single pass — plan one search → retrieve candidates → pick the single best dataset → (optionally) download it → synthesize.
+  - **Deep**: a bounded research loop — decompose the question into several search angles → gather a candidate pool → select and download multiple datasets → reflect on coverage and search again to fill gaps → synthesize across all sources.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -102,19 +104,20 @@ The public demo runs on GitHub Pages:
 
 https://artvandelay.github.io/ndap-deep-research-agent/
 
-It is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it:
+It is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it searches a browser-friendly metadata export generated from `data/index.db` and grounds the answer in the matching records (and, in real-numbers mode, their downloaded rows).
 
-1. asks the selected OpenRouter model to plan a compact search query,
-2. searches a browser-friendly metadata export generated from `data/index.db`,
-3. retrieves candidate dataset records locally in the browser,
-4. (optional, real-numbers mode) downloads the chosen dataset's rows and computes the answer,
-5. asks the model to synthesize a grounded answer.
+Each chat is **Fast** or **Deep**, chosen with the toggle in the header (top of the chat). The mode is remembered per chat:
+
+- **Fast** — one model-planned search → retrieve candidates → pick the single best dataset → (real-numbers mode) download it → synthesize a grounded answer. Lowest latency and cost.
+- **Deep** — the model decomposes the question into several search angles, gathers a wider candidate pool, then selects and downloads multiple datasets, reflecting between rounds to fill gaps before synthesizing across all of them. Better for questions that need to combine datasets (e.g. rainfall × crop production), at higher latency and cost.
 
 Open Settings (gear icon, top-right) and enter:
 
 - your OpenRouter API key (stored only in your browser's localStorage, sent directly to OpenRouter),
 - an OpenRouter model slug such as `openai/gpt-5.5`, `anthropic/claude-sonnet-4.6`, or another model on your account,
-- optionally, a Data proxy URL to enable real numbers (see below).
+- optionally, a Data proxy URL to enable real numbers (see below),
+- **Max datasets to search** — how many candidate datasets the index search surfaces for the model to choose from (default `100`; applies to both modes),
+- **Deep mode: datasets to analyze** — how many datasets Deep mode will download and analyze per run (default `3`).
 
 Example prompts:
 
@@ -153,11 +156,12 @@ To make the demo **compute real numbers** in the browser, you need two things:
    Paste the resulting `*.workers.dev` URL into Settings → "Data proxy URL". The
    Worker is stateless, stores nothing, and only forwards to `loadqa.ndapapi.com`.
 
-In real-numbers mode the agent fetches rows for the selected dataset (paginated,
-capped), hands the most relevant rows to the model as CSV, and the model computes
-the answer with the actual values. The numbers reflect the breakdown encoded in
-the stored recipe (e.g. national/by-dimension); if a requested entity isn't in
-those rows, the model is instructed to say so.
+In real-numbers mode the agent fetches rows for the selected dataset(s)
+(paginated, capped), hands the most relevant rows to the model as CSV, and the
+model computes the answer with the actual values. Fast mode uses one dataset;
+Deep mode may download several and combine them. The numbers reflect the
+breakdown encoded in the stored recipe (e.g. national/by-dimension); if a
+requested entity isn't in those rows, the model is instructed to say so.
 
 ### Conversations and multi-turn memory
 
