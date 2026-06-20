@@ -122,6 +122,21 @@
       transition: border-color .15s, transform .1s, box-shadow .15s;
     }
     .chip:hover { border-color: var(--blue); transform: translateY(-1px); box-shadow: 0 6px 16px rgba(46,92,246,.10); }
+    .welcome-sub { font-size: 13.5px; }
+    .keynote {
+      display: flex; gap: 12px; align-items: flex-start; text-align: left;
+      max-width: 560px; margin: 26px auto 0;
+      background: #f0f4ff; border: 1px solid #dbe4ff; border-radius: 14px;
+      padding: 14px 16px; color: var(--text); font-size: 13.5px; line-height: 1.5;
+    }
+    .keynote.hidden { display: none; }
+    .keynote .kn-ico { color: var(--blue); flex: 0 0 auto; margin-top: 1px; }
+    .keynote .kn-ico svg { width: 20px; height: 20px; }
+    .kn-actions { display: flex; gap: 14px; align-items: center; margin-top: 10px; flex-wrap: wrap; }
+    .kn-btn { border: 0; border-radius: 9px; background: linear-gradient(135deg,#2e5cf6,#1e46d2); color:#fff; font-weight:700; font-size:12.5px; padding:7px 13px; cursor:pointer; }
+    .kn-btn:hover { filter: brightness(1.06); }
+    .kn-link { color: var(--blue); font-weight:600; font-size:12.5px; text-decoration:none; white-space:nowrap; }
+    .kn-link:hover { text-decoration: underline; }
 
     /* Messages */
     .msg { display: flex; gap: 12px; }
@@ -323,9 +338,24 @@
     <div class="scroll" id="scroll">
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
-          <h2 class="big">What do you want to find in NDAP?</h2>
-          <p>I plan a search, retrieve candidate datasets from a local index built from <code>data/index.db</code>, and answer grounded in that metadata. Pick a starting point:</p>
+          <h2 class="big">Ask anything about India's public data</h2>
+          <p>This is an AI research assistant for <strong>NDAP</strong> — NITI Aayog's National Data &amp; Analytics Platform. Ask a question in plain English and it searches across <strong><span id="welcomeCount">6,600+</span> official Indian government datasets</strong>, picks the most relevant ones, pulls the actual numbers, and writes a clear answer with every figure linked back to its source dataset — no guesswork.</p>
+          <p class="welcome-sub">It's good at comparing trends over time, figuring out which datasets to combine for a question, and returning real, cited figures. Try a starting point:</p>
           <div class="chips" id="chips"></div>
+          <div class="keynote" id="keyNote">
+            <span class="kn-ico" aria-hidden="true">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <circle cx="7.5" cy="15.5" r="4.5"></circle><path d="M10.7 12.3 19 4"></path><path d="M16 7l3 3"></path><path d="M14 9l3 3"></path>
+              </svg>
+            </span>
+            <div>
+              <strong>First time here?</strong> You bring your own OpenRouter API key to run searches — it's stored only in your browser and never uploaded anywhere.
+              <div class="kn-actions">
+                <button class="kn-btn" id="welcomeAddKey" type="button">Add your key</button>
+                <a class="kn-link" href="https://openrouter.ai/keys" target="_blank" rel="noopener">How to get a key &rarr;</a>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -453,12 +483,18 @@
     function refreshKeyPill() {
       const pill = $("indexPill");
       if (!ndapIndex) return;
+      const count = ndapIndex.datasetCount.toLocaleString();
+      const wc = $("welcomeCount");
+      if (wc) wc.textContent = count;
+      const note = $("keyNote");
       if (settings.key) {
         pill.className = "pill ok";
-        $("indexStatus").textContent = `${ndapIndex.datasetCount.toLocaleString()} datasets · ready`;
+        $("indexStatus").textContent = `${count} datasets · ready`;
+        if (note) note.classList.add("hidden");
       } else {
         pill.className = "pill warn";
-        $("indexStatus").textContent = `${ndapIndex.datasetCount.toLocaleString()} datasets · add key`;
+        $("indexStatus").textContent = `${count} datasets · add key`;
+        if (note) note.classList.remove("hidden");
       }
     }
 
@@ -943,6 +979,7 @@
     $("newChat").addEventListener("click", resetChat);
 
     $("openSettings").addEventListener("click", openDrawer);
+    { const wak = $("welcomeAddKey"); if (wak) wak.addEventListener("click", openDrawer); }
     $("closeSettings").addEventListener("click", closeDrawer);
     $("backdrop").addEventListener("click", closeDrawer);
     $("saveSettings").addEventListener("click", saveSettings);
