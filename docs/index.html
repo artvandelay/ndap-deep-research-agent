@@ -229,6 +229,21 @@
     .cursor::after { content: "▍"; color: var(--gold); animation: blink 1s steps(1) infinite; }
     @keyframes blink { 50% { opacity: 0; } }
 
+    .usage-foot {
+      display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+      margin-top: 12px; padding-top: 11px; border-top: 1px dashed var(--line);
+      font-size: 12px; color: var(--muted);
+    }
+    .usage-foot .u-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      background: #f7f9fc; border: 1px solid var(--line); border-radius: 999px;
+      padding: 4px 10px; white-space: nowrap;
+    }
+    .usage-foot .u-chip b { color: var(--navy); font-weight: 700; }
+    .usage-foot .u-chip.cost { background: #f0f4ff; border-color: #dbe4ff; }
+    .usage-foot .u-chip.cost b { color: var(--blue); }
+    .usage-foot .u-note { color: var(--faint); }
+
     .answer-tools { display: flex; gap: 8px; margin-top: 10px; }
     .ghost {
       border: 1px solid var(--line); background: #fff; color: var(--muted);
@@ -418,7 +433,9 @@
 
   <script>
     const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy" };
+    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy", history: "ndap.history" };
+    const MAX_SAVED_TURNS = 40;        // how many Q&A pairs to keep on disk
+    const MAX_SAVED_ANSWER_CHARS = 12000;
     const DEFAULT_MODEL = "openai/gpt-5.5";
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
@@ -432,7 +449,8 @@
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
     let busy = false;
-    let convo = [];               // compressed multi-turn memory
+    let convo = [];               // compressed multi-turn memory (for model context)
+    let transcript = [];          // full Q&A pairs (for on-screen history, persisted)
 
     const settings = {
       get key() { return localStorage.getItem(LS.key) || ""; },
@@ -532,6 +550,21 @@
     }
 
     /* ---------- OpenRouter ---------- */
+    // Per-query usage accumulator (tokens + cost across all model calls in one run).
+    let runUsage = null;
+    function resetUsage() {
+      runUsage = { calls: 0, prompt: 0, completion: 0, reasoning: 0, total: 0, cost: 0, hasCost: false };
+    }
+    function accumulateUsage(u) {
+      if (!u || !runUsage) return;
+      runUsage.calls += 1;
+      runUsage.prompt += u.prompt_tokens || 0;
+      runUsage.completion += u.completion_tokens || 0;
+      runUsage.reasoning += u.completion_tokens_details?.reasoning_tokens || 0;
+      runUsage.total += u.total_tokens || ((u.prompt_tokens || 0) + (u.completion_tokens || 0));
+      if (typeof u.cost === "number") { runUsage.cost += u.cost; runUsage.hasCost = true; }
+    }
+
     function orHeaders() {
       return {
         "Authorization": `Bearer ${settings.key}`,
@@ -543,16 +576,17 @@
     async function orComplete(messages, temperature = 0.2, maxTokens = 1024) {
       const res = await fetch(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens }),
+        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
       });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const data = await res.json();
+      accumulateUsage(data.usage);
       return data.choices?.[0]?.message?.content || "";
     }
     async function orStream(messages, temperature, onDelta, maxTokens = 1800) {
       const res = await fetch(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, stream: true }),
+        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, stream: true, usage: { include: true } }),
       });
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const reader = res.body.getReader();
@@ -570,12 +604,34 @@
           const payload = s.slice(5).trim();
           if (payload === "[DONE]") return full;
           try {
-            const delta = JSON.parse(payload).choices?.[0]?.delta?.content;
+            const frame = JSON.parse(payload);
+            // OpenRouter sends usage in a final chunk (empty delta) just before [DONE].
+            if (frame.usage) accumulateUsage(frame.usage);
+            const delta = frame.choices?.[0]?.delta?.content;
             if (delta) { full += delta; onDelta(full); }
           } catch (_) { /* keep partial frame */ }
         }
       }
       return full;
+    }
+    function formatCost(c) {
+      if (c >= 0.01) return `$${c.toFixed(4)}`;
+      if (c > 0) return `$${c.toFixed(6)}`;
+      return "$0";
+    }
+    function renderUsageFooter(container) {
+      if (!runUsage || !runUsage.calls) return;
+      const u = runUsage;
+      const foot = el("div", "usage-foot");
+      const chip = (cls, label, val) => `<span class="u-chip ${cls}">${label} <b>${val}</b></span>`;
+      let html = "";
+      if (u.hasCost) html += chip("cost", "Cost", formatCost(u.cost));
+      html += chip("", "Tokens", u.total.toLocaleString());
+      html += `<span class="u-note">${u.prompt.toLocaleString()} in · ${u.completion.toLocaleString()} out${u.reasoning ? ` · ${u.reasoning.toLocaleString()} reasoning` : ""}</span>`;
+      html += chip("", "Model calls", String(u.calls));
+      html += `<span class="u-note">${escapeHtml(settings.model)}</span>`;
+      foot.innerHTML = html;
+      container.appendChild(foot);
     }
     function extractJson(text) {
       const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
@@ -598,9 +654,48 @@
     }
 
     function rememberTurn(question, datasetLabel, answer) {
-      const trimmed = (answer || "").replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
+      const full = (answer || "").trim();
+      const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
       convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
       if (convo.length > MAX_TURNS * 2) convo = convo.slice(-MAX_TURNS * 2);
+      transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS) });
+      if (transcript.length > MAX_SAVED_TURNS) transcript = transcript.slice(-MAX_SAVED_TURNS);
+      saveHistory();
+    }
+
+    function saveHistory() {
+      try { localStorage.setItem(LS.history, JSON.stringify({ convo, transcript })); } catch (e) { /* quota — skip */ }
+    }
+    function clearHistory() {
+      convo = []; transcript = [];
+      try { localStorage.removeItem(LS.history); } catch (e) {}
+    }
+    function restoreHistory() {
+      let saved = null;
+      try { saved = JSON.parse(localStorage.getItem(LS.history) || "null"); } catch (e) {}
+      if (!saved || !Array.isArray(saved.transcript) || !saved.transcript.length) return false;
+      convo = Array.isArray(saved.convo) ? saved.convo : [];
+      transcript = saved.transcript;
+      $("welcome")?.remove();
+      for (const t of transcript) { addUser(t.q); addRestoredAnswer(t.a); }
+      scrollDown();
+      return true;
+    }
+    function addRestoredAnswer(markdownText) {
+      const m = el("div", "msg bot");
+      m.appendChild(el("div", "av", "N"));
+      const body = el("div", "body");
+      body.appendChild(el("div", "who", "Agent"));
+      const answer = el("div", "answer");
+      answer.innerHTML = renderMarkdown(markdownText || "");
+      const tools = el("div", "answer-tools");
+      const copyBtn = el("button", "ghost", "Copy");
+      copyBtn.onclick = () => { navigator.clipboard.writeText(markdownText || ""); copyBtn.textContent = "Copied ✓"; setTimeout(() => copyBtn.textContent = "Copy", 1400); };
+      tools.appendChild(copyBtn);
+      answer.appendChild(tools);
+      body.appendChild(answer);
+      m.appendChild(body);
+      $("thread").appendChild(m);
     }
 
     // Turn an API error into a short, friendly, actionable message.
@@ -815,6 +910,7 @@
       if (!settings.key) { openDrawer(); $("savedFlash").textContent = "Add your OpenRouter key to start."; return; }
 
       busy = true; $("send").disabled = true;
+      resetUsage();
       input.value = ""; input.style.height = "auto";
       addUser(question);
       const ui = addAssistant();
@@ -931,6 +1027,7 @@
         ui.proc.open = true;
         ui.answer.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`;
       } finally {
+        renderUsageFooter(ui.answer);
         busy = false; $("send").disabled = false;
         input.focus();
       }
@@ -953,15 +1050,17 @@
       });
     }
 
+    function bindWelcomeKey() {
+      const wak = $("welcomeAddKey");
+      if (wak) wak.addEventListener("click", openDrawer);
+    }
     function resetChat() {
       if (busy) return;
-      convo = [];
-      $("thread").innerHTML =
-        '<div class="welcome" id="welcome">' +
-        '<h2 class="big">What do you want to find in NDAP?</h2>' +
-        '<p>I plan a search, retrieve candidate datasets from a local index built from <code>data/index.db</code>, and answer grounded in that metadata. Pick a starting point:</p>' +
-        '<div class="chips" id="chips"></div></div>';
+      clearHistory();
+      $("thread").innerHTML = WELCOME_HTML;
       renderChips();
+      bindWelcomeKey();
+      refreshKeyPill();
       $("input").focus();
     }
 
@@ -979,7 +1078,7 @@
     $("newChat").addEventListener("click", resetChat);
 
     $("openSettings").addEventListener("click", openDrawer);
-    { const wak = $("welcomeAddKey"); if (wak) wak.addEventListener("click", openDrawer); }
+    bindWelcomeKey();
     $("closeSettings").addEventListener("click", closeDrawer);
     $("backdrop").addEventListener("click", closeDrawer);
     $("saveSettings").addEventListener("click", saveSettings);
@@ -990,7 +1089,9 @@
     });
     document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeDrawer(); });
 
+    const WELCOME_HTML = $("thread").innerHTML;
     renderChips();
+    restoreHistory();
     loadIndex().catch((err) => {
       $("indexPill").className = "pill warn";
       $("indexStatus").textContent = "index failed";
