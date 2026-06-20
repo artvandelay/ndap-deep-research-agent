@@ -35,6 +35,18 @@ AGG_GUARDRAIL = (
     "otherwise state the dataset is too granular or incomplete to total here and label it 'Low Confidence / Unverified'."
 )
 
+NDAP_HARD_RULE = (
+    " HARD RULE — SOURCE: NDAP is the ONLY permitted source. Use ONLY the NDAP data/metadata supplied in this prompt. "
+    "Never use outside or general knowledge, training-data facts, or any non-NDAP source, and never cite or link anything "
+    "other than NDAP datasets (ndap.niti.gov.in). If the supplied NDAP data does not answer the question, say so plainly."
+)
+
+INDIA_SCOPE = (
+    " SCOPE: this platform answers questions about INDIA. If a dataset spans multiple countries or many time periods, "
+    "isolate India and the year(s) the question asks for (or the most recent available) — never report another country's "
+    "value or an unrelated/old period as if it were the answer."
+)
+
 HOMEPAGE_CHIPS = [
     "Compare India's total slum population in 2001 vs 2011 and break it down by sex, with the change and growth rate.",
     "Which NDAP datasets would I join to correlate state-level rainfall with crop production over time, and what's the geography/time overlap?",
@@ -165,7 +177,10 @@ def select_datasets(model: str, question: str, pool, already: list[str], n: int)
         "city/state question just because its name mentions the topic — judge by grain and dims, not the title. If NO "
         "candidate has fine-enough grain, pick the closest coarser-grain dataset so the answer can report what IS "
         "available with a caveat. Also for a national/state total, prefer a dataset already reported at that level over "
-        "a highly granular one (a national total cannot be reconstructed by summing partially-downloaded sub-rows)."
+        "a highly granular one (a national total cannot be reconstructed by summing partially-downloaded sub-rows). "
+        "INDIA SCOPE: this platform answers questions about India, so prefer datasets scoped to India (grain "
+        "Country/State/District/etc.) over multi-country/'Global' series (e.g. ILO or World-Bank global datasets); only "
+        "choose a Global-grain dataset when no India-scoped candidate covers the measure."
     )
     msgs = [
         {"role": "system", "content": f"Choose up to {n} dataset(s) to DOWNLOAD — FEWER IS BETTER. {grain} Return JSON only."},
@@ -273,7 +288,7 @@ def download_for_llm(pick, question, row_cap):
 
 def metadata_messages(question, candidates):
     return [
-        {"role": "system", "content": "You are an NDAP-only research assistant. Answer using ONLY supplied metadata. Cite dataset IDs. Do not invent values. Use markdown only."},
+        {"role": "system", "content": "You are an NDAP-only research assistant. Answer using ONLY supplied metadata. Cite dataset IDs. Do not invent values. Use markdown only." + NDAP_HARD_RULE},
         {"role": "user", "content": f"Current question:\n{question}\n\nCandidate metadata:\n{json.dumps(candidates, indent=2)}\n\nGive a concise grounded answer."},
     ]
 
@@ -331,7 +346,7 @@ def parse_fetch_request(text):
 
 
 def data_initial_messages(question, collected, deep, any_hidden):
-    sys = ("You are an NDAP-only deep-research analyst across MULTIPLE datasets." if deep else "You are an NDAP-only data analyst.") + " Compute ONLY from supplied CSV rows. Cite dataset ID. Use markdown only — no LaTeX." + AGG_GUARDRAIL
+    sys = ("You are an NDAP-only deep-research analyst across MULTIPLE datasets." if deep else "You are an NDAP-only data analyst.") + " Compute ONLY from supplied CSV rows. Cite dataset ID. Use markdown only — no LaTeX." + AGG_GUARDRAIL + INDIA_SCOPE + NDAP_HARD_RULE
     blocks = []
     for c in collected:
         hidden = len(c["used"]) < len(c["rows"])
