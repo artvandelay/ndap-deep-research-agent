@@ -565,11 +565,11 @@
     // Turn an API error into a short, friendly, actionable message.
     function friendlyError(err) {
       const m = String(err && err.message || err);
-      if (/\b402\b|requires more credits|insufficient/i.test(m))
-        return "Out of OpenRouter credits for this request. Add credits or pick a cheaper model in Settings, then try again.";
+      if (/\b402\b|requires more credits|insufficient|key limit exceeded|limit exceeded|\bcredit/i.test(m))
+        return "Out of OpenRouter credits or the key's spending limit was reached. Add credits / raise the limit in your OpenRouter dashboard, or pick a cheaper model in Settings, then try again.";
       if (/context length|maximum context|too many tokens|\b413\b/i.test(m))
         return "This conversation got too long for the model's context. Start a new chat (top-right) to reset, or ask a shorter question.";
-      if (/\b401\b|invalid api key|no auth/i.test(m))
+      if (/\b401\b|invalid api key|no auth|user not found/i.test(m))
         return "OpenRouter rejected the API key. Check it in Settings.";
       if (/\b429\b|rate limit/i.test(m))
         return "OpenRouter rate-limited this request. Wait a moment and try again.";
