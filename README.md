@@ -9,7 +9,7 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A small Streamlit chat demo for OpenRouter-powered agentic dataset search.
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 - A response template for traceable NDAP question answering in `SRIT_NDAP_QUERY_RESPONSE_TEMPLATE.md`.
 
@@ -27,9 +27,12 @@ The project is designed for deep-research agents that need to discover relevant 
 ├── query.py                          # Query layer over data/index.db
 ├── ndap_download.py                  # On-demand dataset downloader
 ├── mcp_server.py                     # FastMCP server exposing NDAP tools
-├── demo_app.py                       # Streamlit chat demo using OpenRouter + SQLite search
+├── docs/                             # Static GitHub Pages demo
+│   ├── index.html                    # Browser chat UI
+│   └── assets/ndap_index.json        # DB-derived browser search index
 ├── scripts/
 │   ├── check_index_coverage.py        # Verify catalogue coverage in data/index.db
+│   ├── export_web_index.py            # Export data/index.db for the Pages demo
 │   └── wait_and_build_index.sh       # Wait for harvest, then rebuild index
 └── data/
     ├── index.db                      # Committed SQLite metadata/search index
@@ -84,20 +87,18 @@ NDAP_TOKEN=...
 
 ## Run The Chat Demo
 
-The demo is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it:
+The public demo runs on GitHub Pages:
+
+https://artvandelay.github.io/ndap-deep-research-agent/
+
+It is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it:
 
 1. asks the selected OpenRouter model to plan a compact search query,
-2. runs `search_datasets` against the local SQLite/FTS index,
-3. fetches candidate metadata with `get_dataset_metadata`,
+2. searches a browser-friendly metadata export generated from `data/index.db`,
+3. retrieves candidate dataset records locally in the browser,
 4. asks the model to synthesize a grounded answer from retrieved metadata only.
 
-Launch it with:
-
-```bash
-streamlit run demo_app.py
-```
-
-Then enter:
+Enter:
 
 - your OpenRouter API key,
 - an OpenRouter model slug such as `openai/gpt-5.5`, `anthropic/claude-sonnet-4.6`, or another model available on your account,
@@ -112,6 +113,12 @@ What datasets could compare crop production across states over time?
 ```
 
 The demo is intentionally metadata-first. It is meant to show the agentic search loop, not to produce final statistical answers from raw observations. For factual values or comparisons, use `download_dataset` after the right dataset has been identified.
+
+To refresh the static Pages search asset after rebuilding `data/index.db`:
+
+```bash
+python scripts/export_web_index.py
+```
 
 ## Refresh Or Rebuild The Metadata Index
 

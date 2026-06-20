@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NDAP Deep Research Agent</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #05070a;
+      --panel: #0b1118;
+      --panel-2: #111a25;
+      --line: #263447;
+      --text: #e6edf3;
+      --muted: #93a4b8;
+      --gold: #f8d66d;
+      --green: #7ee787;
+      --blue: #8ab4f8;
+      --danger: #ff7b72;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, #1b2430 0, #0b0f14 38%, #05070a 100%);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    .shell {
+      display: grid;
+      grid-template-columns: 320px minmax(0, 1fr);
+      min-height: 100vh;
+    }
+
+    aside {
+      border-right: 1px solid var(--line);
+      background: rgba(5, 8, 13, 0.88);
+      padding: 22px;
+      position: sticky;
+      top: 0;
+      height: 100vh;
+    }
+
+    main {
+      padding: 28px;
+      max-width: 1120px;
+      width: 100%;
+      margin: 0 auto;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: clamp(28px, 4vw, 46px);
+      letter-spacing: -0.045em;
+      line-height: 1;
+    }
+
+    h2 {
+      margin: 22px 0 10px;
+      font-size: 15px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    p { color: var(--muted); line-height: 1.55; }
+
+    .hero {
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      padding: 26px;
+      background: linear-gradient(135deg, rgba(24, 35, 50, 0.96), rgba(7, 10, 15, 0.96));
+      box-shadow: 0 20px 70px rgba(0, 0, 0, 0.34);
+      margin-bottom: 18px;
+    }
+
+    .hero strong { color: var(--gold); }
+
+    label {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin: 16px 0 7px;
+    }
+
+    input, textarea, button, select {
+      font: inherit;
+    }
+
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #070b10;
+      color: var(--text);
+      padding: 12px 13px;
+      outline: none;
+    }
+
+    textarea {
+      min-height: 104px;
+      resize: vertical;
+    }
+
+    input:focus, textarea:focus {
+      border-color: var(--blue);
+      box-shadow: 0 0 0 3px rgba(138, 180, 248, 0.12);
+    }
+
+    button {
+      width: 100%;
+      border: 0;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #f8d66d, #d29d2f);
+      color: #15100a;
+      font-weight: 800;
+      padding: 12px 14px;
+      margin-top: 16px;
+      cursor: pointer;
+    }
+
+    button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+    }
+
+    .tiny {
+      font-size: 12px;
+      color: #718197;
+    }
+
+    .status {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 12px;
+    }
+
+    .pulse {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--green);
+      box-shadow: 0 0 18px rgba(126, 231, 135, 0.75);
+    }
+
+    .chat {
+      display: grid;
+      gap: 16px;
+    }
+
+    .bubble {
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      background: rgba(7, 11, 16, 0.82);
+      padding: 18px;
+    }
+
+    .bubble.user {
+      background: rgba(21, 32, 45, 0.86);
+      border-color: #34465f;
+    }
+
+    .bubble h3 {
+      margin: 0 0 8px;
+      color: var(--gold);
+      font-size: 14px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .trace {
+      border: 1px solid #253244;
+      border-radius: 14px;
+      padding: 12px 14px;
+      background: rgba(3, 7, 12, 0.92);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+      margin: 10px 0 18px;
+    }
+
+    .tool-line {
+      display: grid;
+      grid-template-columns: 12px 190px minmax(0, 1fr) auto;
+      gap: 10px;
+      align-items: baseline;
+      padding: 6px 0;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.045);
+    }
+
+    .tool-line:last-child { border-bottom: 0; }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--gold);
+      box-shadow: 0 0 12px rgba(248, 214, 109, 0.75);
+    }
+    .tool-name { color: var(--gold); font-weight: 800; }
+    .tool-detail { color: #c8d4e3; overflow-wrap: anywhere; }
+    .duration { color: #7f8fa3; font-size: 12px; }
+
+    .cards {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 10px;
+      margin: 12px 0;
+    }
+
+    .card {
+      border: 1px solid #263241;
+      border-radius: 14px;
+      padding: 13px;
+      background: rgba(13, 19, 27, 0.82);
+    }
+
+    .card b { color: var(--text); }
+    .card small { color: #8293a9; }
+    .answer {
+      white-space: pre-wrap;
+      line-height: 1.55;
+    }
+
+    .error { color: var(--danger); }
+
+    @media (max-width: 820px) {
+      .shell { grid-template-columns: 1fr; }
+      aside { position: relative; height: auto; }
+      main { padding: 18px; }
+      .tool-line { grid-template-columns: 12px 1fr; }
+      .duration { display: none; }
+      .tool-detail { grid-column: 2; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <aside>
+      <h2>OpenRouter</h2>
+      <label for="apiKey">API key</label>
+      <input id="apiKey" type="password" placeholder="sk-or-..." autocomplete="off" />
+
+      <label for="model">Model slug</label>
+      <input id="model" value="openai/gpt-5.5" />
+
+      <label for="limit">Candidate count</label>
+      <input id="limit" type="number" min="3" max="12" value="8" />
+
+      <button id="runBtn">Run agentic search</button>
+
+      <div class="status"><span class="pulse"></span><span id="indexStatus">Loading metadata index...</span></div>
+      <p class="tiny">The key is kept in this browser session and sent only to OpenRouter. The local NDAP index is loaded from this GitHub Pages site.</p>
+    </aside>
+
+    <main>
+      <section class="hero">
+        <h1>NDAP Deep Research Agent</h1>
+        <p><strong>Static GitHub Pages demo.</strong> The model plans a search, browser tools retrieve candidate datasets from a DB-derived index, and the final answer is grounded in NDAP metadata.</p>
+      </section>
+
+      <section class="bubble">
+        <h3>Ask NDAP</h3>
+        <textarea id="question">Which datasets cover slum population by city?</textarea>
+        <p class="tiny">Try: “Find district-level school enrolment datasets by social category” or “What datasets compare crop production across states over time?”</p>
+      </section>
+
+      <section id="chat" class="chat"></section>
+    </main>
+  </div>
+
+  <script>
+    const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
+    let ndapIndex = null;
+
+    const $ = (id) => document.getElementById(id);
+    const escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (ch) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#039;"
+    }[ch]));
+
+    function tokenize(text) {
+      return String(text || "")
+        .toLowerCase()
+        .match(/[a-z0-9]+/g)
+        ?.filter((term) => term.length > 2) || [];
+    }
+
+    function renderTrace(lines) {
+      return `<div class="trace">${lines.map((line) => `
+        <div class="tool-line">
+          <span class="dot"></span>
+          <span class="tool-name">${escapeHtml(line.name)}</span>
+          <span class="tool-detail">${escapeHtml(line.detail)}</span>
+          <span class="duration">${escapeHtml(line.duration)}</span>
+        </div>
+      `).join("")}</div>`;
+    }
+
+    function addBubble(kind, html) {
+      const div = document.createElement("section");
+      div.className = `bubble ${kind}`;
+      div.innerHTML = html;
+      $("chat").prepend(div);
+      return div;
+    }
+
+    async function loadIndex() {
+      const response = await fetch("assets/ndap_index.json");
+      if (!response.ok) throw new Error(`index fetch failed: ${response.status}`);
+      ndapIndex = await response.json();
+      $("indexStatus").textContent = `${ndapIndex.datasetCount.toLocaleString()} datasets loaded`;
+    }
+
+    async function callOpenRouter(apiKey, model, messages, temperature = 0.2) {
+      const response = await fetch(OPENROUTER_URL, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${apiKey}`,
+          "Content-Type": "application/json",
+          "HTTP-Referer": "https://artvandelay.github.io/ndap-deep-research-agent/",
+          "X-Title": "NDAP Deep Research Agent Demo"
+        },
+        body: JSON.stringify({ model, messages, temperature })
+      });
+      if (!response.ok) {
+        const text = await response.text();
+        throw new Error(`OpenRouter ${response.status}: ${text.slice(0, 280)}`);
+      }
+      const data = await response.json();
+      return data.choices[0].message.content;
+    }
+
+    function extractJson(text) {
+      const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
+      const raw = fenced ? fenced[1] : text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+      return JSON.parse(raw);
+    }
+
+    async function planSearch(question, apiKey, model) {
+      const messages = [
+        {
+          role: "system",
+          content: "You plan searches over an NDAP metadata index. Return JSON only. Choose concise search terms and useful synonyms. Do not answer."
+        },
+        {
+          role: "user",
+          content: `Question:\n${question}\n\nReturn exactly: {"search_query":"...","reason":"..."}`
+        }
+      ];
+      try {
+        const content = await callOpenRouter(apiKey, model, messages, 0);
+        const parsed = extractJson(content);
+        return {
+          search_query: String(parsed.search_query || question),
+          reason: String(parsed.reason || "Model-derived search terms.")
+        };
+      } catch (error) {
+        return {
+          search_query: question,
+          reason: `Planner fallback used: ${error.message}`
+        };
+      }
+    }
+
+    function searchIndex(searchQuery, limit) {
+      const terms = tokenize(searchQuery);
+      const scored = ndapIndex.items.map((item) => {
+        const haystack = `${item.name} ${item.description} ${item.sector} ${item.ministry} ${item.geo} ${item.time}`.toLowerCase();
+        let score = 0;
+        for (const term of terms) {
+          if (String(item.name).toLowerCase().includes(term)) score += 8;
+          if (String(item.description).toLowerCase().includes(term)) score += 5;
+          if (String(item.sector).toLowerCase().includes(term)) score += 3;
+          if (String(item.ministry).toLowerCase().includes(term)) score += 2;
+          if (haystack.includes(term)) score += 1;
+        }
+        return { item, score };
+      }).filter((row) => row.score > 0);
+
+      scored.sort((a, b) => b.score - a.score || a.item.id - b.item.id);
+      return scored.slice(0, limit).map((row) => row.item);
+    }
+
+    async function synthesize(question, candidates, apiKey, model) {
+      const messages = [
+        {
+          role: "system",
+          content: "You are an NDAP-only research assistant. Answer using only supplied NDAP metadata. Cite dataset IDs. Do not invent raw values, causal claims, or future predictions. If raw data is needed, say what to download next."
+        },
+        {
+          role: "user",
+          content: `User question:\n${question}\n\nRetrieved candidate metadata:\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise answer with likely datasets, why they match, and next action.`
+        }
+      ];
+      return callOpenRouter(apiKey, model, messages, 0.2);
+    }
+
+    function candidateCards(candidates) {
+      return `<div class="cards">${candidates.map((item) => `
+        <div class="card">
+          <b>${escapeHtml(item.id)} | ${escapeHtml(item.name)}</b>
+          <p>${escapeHtml(item.description || "No description")}</p>
+          <small>${escapeHtml(item.sector)} · ${escapeHtml(item.ministry)} · ${escapeHtml(item.years || "?")}</small>
+        </div>
+      `).join("")}</div>`;
+    }
+
+    async function runAgent() {
+      if (!ndapIndex) return;
+      const question = $("question").value.trim();
+      const apiKey = $("apiKey").value.trim();
+      const model = $("model").value.trim();
+      const limit = Math.max(3, Math.min(12, Number($("limit").value || 8)));
+
+      if (!question) return;
+      if (!apiKey || !model) {
+        addBubble("assistant", `<h3>Missing setup</h3><p class="error">Enter an OpenRouter API key and model slug.</p>`);
+        return;
+      }
+
+      $("runBtn").disabled = true;
+      addBubble("user", `<h3>User</h3><div class="answer">${escapeHtml(question)}</div>`);
+      const bubble = addBubble("assistant", `<h3>Agent</h3><p>Planning search...</p>`);
+
+      const trace = [];
+      try {
+        const plan = await planSearch(question, apiKey, model);
+        trace.push({ name: "Plan Search", detail: plan.reason, duration: "model" });
+
+        const candidates = searchIndex(plan.search_query, limit);
+        trace.push({ name: "search_metadata_index", detail: `q="${plan.search_query}" -> ${candidates.length} candidates`, duration: "browser" });
+        trace.push({ name: "Retrieve Metadata", detail: `${candidates.length} DB-derived records`, duration: "JSON" });
+
+        bubble.innerHTML = `<h3>Agent</h3>${renderTrace(trace)}${candidateCards(candidates)}<p>Synthesizing grounded answer...</p>`;
+
+        if (!candidates.length) {
+          bubble.innerHTML = `<h3>Agent</h3>${renderTrace(trace)}<p>No matching NDAP datasets found in the local metadata index. Try broader terms.</p>`;
+          return;
+        }
+
+        const answer = await synthesize(question, candidates, apiKey, model);
+        bubble.innerHTML = `<h3>Agent</h3>${renderTrace(trace)}${candidateCards(candidates)}<div class="answer">${escapeHtml(answer)}</div>`;
+      } catch (error) {
+        bubble.innerHTML = `<h3>Agent</h3>${renderTrace(trace)}<p class="error">${escapeHtml(error.message)}</p>`;
+      } finally {
+        $("runBtn").disabled = false;
+      }
+    }
+
+    $("runBtn").addEventListener("click", runAgent);
+    $("question").addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter") runAgent();
+    });
+
+    loadIndex().catch((error) => {
+      $("indexStatus").textContent = "Index failed to load";
+      addBubble("assistant", `<h3>Index Error</h3><p class="error">${escapeHtml(error.message)}</p>`);
+    });
+  </script>
+</body>
+</html>
