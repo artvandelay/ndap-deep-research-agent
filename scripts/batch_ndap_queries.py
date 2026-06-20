@@ -180,7 +180,11 @@ def select_datasets(model: str, question: str, pool, already: list[str], n: int)
         "a highly granular one (a national total cannot be reconstructed by summing partially-downloaded sub-rows). "
         "INDIA SCOPE: this platform answers questions about India, so prefer datasets scoped to India (grain "
         "Country/State/District/etc.) over multi-country/'Global' series (e.g. ILO or World-Bank global datasets); only "
-        "choose a Global-grain dataset when no India-scoped candidate covers the measure."
+        "choose a Global-grain dataset when no India-scoped candidate covers the measure. NATIONAL questions: when the "
+        "question asks for a national / India-wide / all-India figure (e.g. 'national ... rate'), FIRST pick the single "
+        "dataset that reports that measure at the NATIONAL level — a Country-grain India dataset that carries an "
+        "India/national row — in preference to state/district-disaggregated datasets (which often have NO national row) "
+        "and to Global series; do not skip it to pad the list with broader or more granular datasets."
     )
     msgs = [
         {"role": "system", "content": f"Choose up to {n} dataset(s) to DOWNLOAD — FEWER IS BETTER. {grain} Return JSON only."},
