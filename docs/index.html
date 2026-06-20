@@ -550,7 +550,10 @@
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
-    const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model
+    const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model as the initial sample
+    const MAX_DRILL_ITERS = 3;    // model-driven "read more rows" rounds during synthesis
+    const DRILL_ROWS = 500;       // rows returned per model row-request
+    const PROFILE_VALUES_CAP = 40; // distinct dimension values listed in the data profile
     const MAX_TURNS = 3;          // compressed prior turns kept as context
     const MAX_ANSWER_CHARS = 700; // per-turn answer length kept in memory
     const MAX_HISTORY_CHARS = 3500; // total compressed-history budget
@@ -559,7 +562,6 @@
     const DEFAULT_SEARCH_MAX = 100;   // candidate datasets pulled from the index
     const DEFAULT_DEEP_DOWNLOADS = 3; // datasets actually downloaded+analyzed in deep mode
     const DEEP_MAX_ITERS = 3;         // reflect→search→download loop ceiling
-    const DEEP_MIN_ROWS_PER_DS = 80;  // floor on rows per dataset when splitting the row budget
     const FAST_METADATA_CANDIDATES = 12; // candidates fed to the model in fast metadata-only mode
     const SRC_DISPLAY_CAP = 30;       // candidates rendered in the Sources panel
 
@@ -757,9 +759,13 @@
       container.appendChild(foot);
     }
     function extractJson(text) {
-      const fenced = text.match(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/);
-      const raw = fenced ? fenced[1] : text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
-      return JSON.parse(raw);
+      // The first "{" … last "}" slice naturally excludes any ```json fences
+      // (they sit outside the braces) and tolerates prose around the object.
+      const s = String(text);
+      const start = s.indexOf("{");
+      const end = s.lastIndexOf("}");
+      if (start < 0 || end < start) throw new Error("no JSON object in model reply");
+      return JSON.parse(s.slice(start, end + 1));
     }
 
     /* ---------- Conversation memory (compressed) ---------- */
@@ -1061,6 +1067,58 @@
       return `${head}\n${body}`;
     }
 
+    // A column is a filterable "dimension" if its cells are scalars (indicator cells are
+    // aggregation objects). Returns the distinct values so the model knows what it can ask for.
+    function datasetProfile(c) {
+      const dims = [];
+      for (const col of c.columns) {
+        let isDim = true;
+        const vals = new Set();
+        for (const r of c.rows) {
+          const raw = r[col];
+          if (raw && typeof raw === "object") { isDim = false; break; }
+          const v = String(cellValue(raw) ?? "").trim();
+          if (v) vals.add(v);
+        }
+        if (isDim) dims.push({ col, values: [...vals] });
+      }
+      return dims;
+    }
+
+    function profileText(c) {
+      const lines = datasetProfile(c).map(({ col, values }) => {
+        const shown = values.slice(0, PROFILE_VALUES_CAP);
+        const extra = values.length > shown.length ? ` (+${values.length - shown.length} more)` : "";
+        return `- ${col}: ${shown.join(" | ")}${extra}`;
+      });
+      return `Total rows available: ${c.rows.length}${c.truncated ? "+" : ""}\nFilterable dimensions (distinct values):\n${lines.join("\n")}`;
+    }
+
+    // Resolve a model row-request against the dataset's in-memory rows (no new network call).
+    function drillRows(c, req) {
+      c._sent = c._sent || new Set(c.used);
+      let pool = c.rows;
+      if (req.where && typeof req.where === "object") {
+        const entries = Object.entries(req.where).filter(([k]) => c.columns.includes(k));
+        if (entries.length) {
+          pool = c.rows.filter((r) => entries.every(([k, val]) =>
+            String(cellValue(r[k]) ?? "").toLowerCase().includes(String(val).toLowerCase())));
+        }
+      }
+      const unseen = pool.filter((r) => !c._sent.has(r));
+      const chosen = (unseen.length ? unseen : pool).slice(0, DRILL_ROWS);
+      for (const r of chosen) c._sent.add(r);
+      return chosen;
+    }
+
+    function parseFetchRequest(text) {
+      try {
+        const o = extractJson(text);
+        if (o && o.fetch_rows && typeof o.fetch_rows === "object") return o.fetch_rows;
+      } catch (_) { /* not a fetch request */ }
+      return null;
+    }
+
     /* ---------- Agent reasoning (model calls; all return plain data) ---------- */
     // Compact prior-conversation block reused by every reasoning prompt.
     const convoBlock = (history) => (history ? `Conversation so far (for follow-up context):\n${history}\n\n` : "");
@@ -1097,15 +1155,23 @@
       }
     }
 
-    // Search several queries and merge into one deduped, capped candidate pool.
+    // Search several queries and merge into one deduped, capped pool. Round-robin
+    // across queries (one result each per round) so every angle is represented
+    // instead of the first query saturating the whole pool.
     function searchPool(queries, max) {
+      const ranked = queries.map((q) => searchIndex(q, max));
       const seen = new Map();
-      for (const q of queries) {
-        for (const item of searchIndex(q, max)) {
-          if (!seen.has(item.id)) seen.set(item.id, item);
-          if (seen.size >= max) break;
+      for (let rank = 0; seen.size < max; rank++) {
+        let progressed = false;
+        for (const list of ranked) {
+          if (rank < list.length) {
+            progressed = true;
+            const item = list[rank];
+            if (!seen.has(item.id)) seen.set(item.id, item);
+            if (seen.size >= max) break;
+          }
         }
-        if (seen.size >= max) break;
+        if (!progressed) break;
       }
       return [...seen.values()].slice(0, max);
     }
@@ -1114,7 +1180,7 @@
     async function selectDatasets(question, pool, alreadyHave, n, history) {
       const have = alreadyHave.length ? `Already downloaded: ${alreadyHave.join(", ")}. Pick only NEW datasets that add information still missing.\n` : "";
       const messages = [
-        { role: "system", content: `Choose up to ${n} dataset(s) to DOWNLOAD that TOGETHER best answer the question (e.g. one per data need that must be combined). Use the prior conversation to keep the SAME topic on follow-ups. Prefer datasets whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. Match the geography/time the question needs. Avoid duplicating already-downloaded data. Return JSON only.` },
+        { role: "system", content: `Choose the dataset(s) to DOWNLOAD that best answer the question — up to ${n}, but FEWER IS BETTER. A single dataset often answers the whole question (including breakdowns like by-sex or multiple years that live as rows/dimensions within ONE dataset); pick that one and stop. Only add more datasets when they genuinely supply data the first one(s) lack (a distinct measure that must be combined, e.g. rainfall AND crop production). Do NOT pad the list to reach the limit, and do NOT pick one dataset per phrase in the question. Use the prior conversation to keep the SAME topic on follow-ups. Prefer datasets whose measures contain the absolute counts/values the question needs over derived datasets (shares, ratios, percentages) unless explicitly asked. Match the geography/time the question needs, and MATCH THE GRAIN: for a national or state total, prefer a dataset already reported at that level (one row per country/state) over a highly granular one (town/ward/village/household level) — a national total cannot be reconstructed reliably by summing thousands of granular sub-rows that we only partially download. Avoid duplicating already-downloaded data. Return JSON only.` },
         { role: "user", content: `${convoBlock(history)}${have}Current question:\n${question}\n\nCandidates:\n${JSON.stringify(slimCandidates(pool))}\n\nReturn exactly: {"dataset_ids":[<id>, ...],"reason":"..."}` },
       ];
       const fresh = (c) => !alreadyHave.includes(String(c.id));
@@ -1238,26 +1304,78 @@
     }
 
     /* ---------- Message builders (shared by fast & deep) ---------- */
+    // Per-dataset completeness flag so the model knows whether it may aggregate.
+    function rowsNote(c) {
+      const partial = c.used.length < c.rows.length;
+      const flag = c.truncated
+        ? "TRUNCATED at the fetch cap — more rows exist, dataset is INCOMPLETE"
+        : (partial ? "PARTIAL filtered subset" : "COMPLETE dataset (all rows present)");
+      const counts = partial ? `${c.used.length} of ${c.rows.length}${c.truncated ? "+" : ""} fetched` : `${c.used.length} (all rows)`;
+      return `Rows provided: ${counts} — ${flag}`;
+    }
+    // Shared rule that stops the model from totalling a partial/truncated sample.
+    const AGG_GUARDRAIL = " CRITICAL aggregation rule: the supplied rows may be a PARTIAL, filtered, or TRUNCATED subset. Never compute a sum, total, count, or cross-entity average (across towns/states/categories) from a subset marked PARTIAL or TRUNCATED — that result would be wrong. Only aggregate across entities when the dataset is marked COMPLETE. If the question needs a total but the rows are partial/truncated/too granular, do not fabricate one: prefer a row that already represents the requested total (e.g. a 'Persons'/'Total'/national row), otherwise state the dataset is too granular or incomplete to total here and label it 'Low Confidence / Unverified'.";
     function metadataMessages(question, candidates, histPreamble) {
       return [
-        { role: "system", content: "You are an NDAP-only research assistant for India's National Data and Analytics Platform. Answer using ONLY the supplied NDAP metadata; use prior conversation only to interpret the question. Cite every dataset you rely on by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>, and also include the dataset's source URL if one is present in the supplied metadata. If you cannot point to a deterministic source (dataset ID or URL) for a statement, withhold it or label it 'Low Confidence / Unverified'. If your answer spans multiple datasets or relies on inferred values, tag those statements with a caveat and state key assumptions in plain language a non-technical reader can follow. Do not invent raw values. Do not make causal or driver claims or future predictions. Reply in the user's language. If NDAP evidence is insufficient, say so and name the dataset to download next. Use markdown." },
+        { role: "system", content: "You are an NDAP-only research assistant for India's National Data and Analytics Platform. Answer using ONLY the supplied NDAP metadata; use prior conversation only to interpret the question. Cite every dataset you rely on by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>, and also include the dataset's source URL if one is present in the supplied metadata. If you cannot point to a deterministic source (dataset ID or URL) for a statement, withhold it or label it 'Low Confidence / Unverified'. If your answer spans multiple datasets or relies on inferred values, tag those statements with a caveat and state key assumptions in plain language a non-technical reader can follow. Do not invent raw values. Do not make causal or driver claims or future predictions. Reply in the user's language. If NDAP evidence is insufficient, say so and name the dataset to download next. Use markdown only — no LaTeX or math delimiters (\\(, \\), \\[, \\]); write any formulas in plain text or inline code." },
         { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
       ];
     }
-    function singleDatasetMessages(question, c, histPreamble) {
+    const DATA_SYS_SINGLE = "You are an NDAP-only data analyst for India's National Data and Analytics Platform. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset; use prior conversation only to interpret the question. Cite the dataset by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (a small markdown table is ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly and label it 'Low Confidence / Unverified'. If you had to combine, derive, or assume anything, flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal claims or future predictions. Reply in the user's language. Use markdown only — no LaTeX or math delimiters (\\(, \\), \\[, \\]); write any formulas in plain text or inline code.";
+    const DATA_SYS_MULTI = "You are an NDAP-only deep-research data analyst for India's National Data and Analytics Platform. You are given CSV rows from MULTIPLE NDAP datasets. Compute the answer ONLY from the supplied rows; use prior conversation only to interpret the question. Combine datasets when the question needs it (e.g. correlate or join on shared geography/time), but only join on matching keys actually present in the rows. Cite EVERY dataset you use by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (markdown tables are ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year/state) is missing from the rows, say so explicitly and label it 'Low Confidence / Unverified'. Whenever you combine, derive, or assume anything (e.g. aligning differing geographies or years), flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal/driver claims or future predictions. Reply in the user's language. Use markdown only — no LaTeX or math delimiters (\\(, \\), \\[, \\]); write any formulas in plain text or inline code.";
+
+    // Initial synthesis messages. When a dataset is larger than its sample, include a data
+    // profile + the row-request protocol so the model can pull the exact rows it needs.
+    function dataInitialMessages(question, collected, histPreamble, deep, anyHidden) {
+      const sys = (deep ? DATA_SYS_MULTI : DATA_SYS_SINGLE) + AGG_GUARDRAIL;
+      const blocks = collected.map((c) => {
+        const hidden = c.used.length < c.rows.length;
+        const profile = hidden ? `\n${profileText(c)}` : "";
+        const sampleLabel = hidden ? `Sample rows (${c.used.length} most-relevant of ${c.rows.length}${c.truncated ? "+" : ""}, CSV):` : "All rows (CSV):";
+        return `Dataset ${c.id} — ${c.name}\nColumns: ${c.columns.join(", ")}\n${rowsNote(c)}${profile}\n\n${sampleLabel}\n${c.csv}`;
+      }).join("\n\n========================================\n\n");
+      const protocol = anyHidden
+        ? `\n\nIMPORTANT — you can pull MORE rows than the sample. These datasets are large and only a sample is shown. If the rows you need (a national/"Persons"/"Total" row, a specific state/city, a specific year, or simply more rows) are NOT in the sample above, do NOT guess and do NOT claim the data is missing — request them. Use the listed dimension values to choose valid filters. When prompted, reply with ONLY this JSON:\n{"fetch_rows":{"dataset":<dataset id>,"where":{"<column>":"<value>"},"more":false,"reason":"why you need them"}}\nProvide "where" to filter rows by matching column values (case-insensitive substring), or omit "where" and set "more":true for the next batch of unseen rows. You may fetch up to ${MAX_DRILL_ITERS} times.`
+        : "";
+      const lead = collected.length > 1 ? `You have ${collected.length} NDAP datasets below — use them together as needed:\n\n` : "";
       return [
-        { role: "system", content: "You are an NDAP-only data analyst for India's National Data and Analytics Platform. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset; use prior conversation only to interpret the question. Cite the dataset by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (a small markdown table is ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly and label it 'Low Confidence / Unverified'. If you had to combine, derive, or assume anything, flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal claims or future predictions. Reply in the user's language." },
-        { role: "user", content: `${histPreamble}Current question:\n${question}\n\nDataset ${c.id} — ${c.name}\nColumns: ${c.columns.join(", ")}\nRows provided: ${c.used.length}${c.rows.length > c.used.length ? ` (most relevant of ${c.rows.length}${c.truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${c.csv}\n\nAnswer with the actual numbers.` },
+        { role: "system", content: sys },
+        { role: "user", content: `${histPreamble}Current question:\n${question}\n\n${lead}${blocks}${protocol}` },
       ];
     }
-    function multiDatasetMessages(question, collected, histPreamble) {
-      const blocks = collected.map((c) =>
-        `Dataset ${c.id} — ${c.name}\nColumns: ${c.columns.join(", ")}\nRows provided: ${c.used.length}${c.rows.length > c.used.length ? ` (most relevant of ${c.rows.length}${c.truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${c.csv}`
-      ).join("\n\n========================================\n\n");
-      return [
-        { role: "system", content: "You are an NDAP-only deep-research data analyst for India's National Data and Analytics Platform. You are given CSV rows from MULTIPLE NDAP datasets. Compute the answer ONLY from the supplied rows; use prior conversation only to interpret the question. Combine datasets when the question needs it (e.g. correlate or join on shared geography/time), but only join on matching keys actually present in the rows. Cite EVERY dataset you use by its ID and as a clickable markdown link to https://ndap.niti.gov.in/dataset/<DATASET_ID>. Show the exact numbers you used (markdown tables are ideal) and state units and year. Do not invent values absent from the rows. If a requested entity (city/year/state) is missing from the rows, say so explicitly and label it 'Low Confidence / Unverified'. Whenever you combine, derive, or assume anything (e.g. aligning differing geographies or years), flag those values with a caveat and state the assumption in plain language a non-technical reader can follow. Do not make causal/driver claims or future predictions. Reply in the user's language. Use markdown." },
-        { role: "user", content: `${histPreamble}Current question:\n${question}\n\nYou have ${collected.length} NDAP datasets below — use them together as needed:\n\n${blocks}\n\nAnswer with the actual numbers, and cite each dataset you use.` },
-      ];
+
+    // Synthesis with a bounded, model-driven "read more rows" loop. All rows are already in
+    // memory, so each expansion is an in-memory re-slice — no extra network calls.
+    async function synthesizeWithDrilldown(question, collected, history, ui, deep, onDelta, maxOut) {
+      const anyHidden = collected.some((c) => c.used.length < c.rows.length);
+      const messages = dataInitialMessages(question, collected, convoBlock(history), deep, anyHidden);
+
+      if (anyHidden) {
+        const ask = `Decision: do you need additional or different rows to answer accurately? If yes, reply with ONLY the fetch_rows JSON. If the rows shown are sufficient, reply with exactly: READY`;
+        for (let i = 1; i <= MAX_DRILL_ITERS; i++) {
+          messages.push({ role: "user", content: ask });
+          const resp = await orComplete(messages, 0, 450);
+          const req = parseFetchRequest(resp);
+          if (!req) { messages.pop(); break; }  // READY (or a non-request) → drop the ask, proceed
+          messages.push({ role: "assistant", content: resp });
+          const ds = collected.find((c) => String(c.id) === String(req.dataset)) || collected[0];
+          const got = drillRows(ds, req);
+          const where = req.where && Object.keys(req.where).length ? ` where ${JSON.stringify(req.where)}` : " (next batch)";
+          liveStep(ui, "expand_rows", `dataset ${ds.id}: +${got.length} row${got.length === 1 ? "" : "s"}${where}`,
+            { payload: req.reason ? `reason: ${req.reason}` : "" });
+          const csv = got.length ? rowsToCsv(ds.columns, got) : "(no rows matched that filter)";
+          messages.push({ role: "user", content: `Rows for dataset ${ds.id} (${got.length}):\n${csv}` });
+        }
+      }
+
+      messages.push({ role: "user", content: "Now write the final grounded answer with the actual numbers, units, and year, citing each dataset by ID. Use markdown only — no LaTeX." });
+      try {
+        return await orStream(messages, 0, onDelta, maxOut);
+      } catch (_) {
+        const t = await orComplete(messages, 0, maxOut);
+        onDelta(t);
+        return t;
+      }
     }
 
     function renderSources(ui, candidates) {
@@ -1310,7 +1428,7 @@
         const pick = picks[0] || candidates[0];
         sel.done(`chose ${pick.id} — ${pick.name}`, `reason: ${reason}`);
         const got = await downloadForLLM(pick, question, ui, MAX_LLM_ROWS);
-        if (got) return { messages: singleDatasetMessages(question, got, pre), usedDataset: `${got.id} (${got.name})` };
+        if (got) return { collected: [got], usedDataset: `${got.id} (${got.name})` };
       }
       return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre), usedDataset: "" };
     }
@@ -1322,8 +1440,10 @@
       planStep.done(`${plan.queries.length} search angle${plan.queries.length === 1 ? "" : "s"}`,
         `queries:\n- ${plan.queries.join("\n- ")}${plan.subQuestions.length ? `\n\nsub-questions:\n- ${plan.subQuestions.join("\n- ")}` : ""}\n\nreason: ${plan.reason}`);
 
-      const pool = searchPool(plan.queries, settings.searchMax);
-      liveStep(ui, "search_index", `${plan.queries.length} quer${plan.queries.length === 1 ? "y" : "ies"} → ${pool.length} unique datasets`);
+      // Seed with the full question so a single dataset that answers everything
+      // always surfaces, then add the decomposed angles for breadth.
+      const pool = searchPool([question, ...plan.queries], settings.searchMax);
+      liveStep(ui, "search_index", `${plan.queries.length} quer${plan.queries.length === 1 ? "y" : "ies"} (+ full question) → ${pool.length} unique datasets`);
       liveStep(ui, "retrieve_metadata", `${pool.length} DB-derived records`);
       renderSources(ui, pool);
       if (!pool.length) return { none: true };
@@ -1333,7 +1453,9 @@
       if (!settings.proxy) return metaFallback();
 
       const budget = settings.deepDownloads;
-      const rowCap = Math.max(DEEP_MIN_ROWS_PER_DS, Math.floor(MAX_LLM_ROWS / budget));
+      // Send each chosen dataset up to the full cap (don't split the budget across
+      // datasets) so small/medium datasets arrive COMPLETE and can be aggregated.
+      const rowCap = MAX_LLM_ROWS;
       const collected = [];
       const downloadedIds = [];
 
@@ -1367,7 +1489,7 @@
       }
 
       return collected.length
-        ? { messages: multiDatasetMessages(question, collected, pre), usedDataset: collected.map((c) => `${c.id} (${c.name})`).join("; ") }
+        ? { collected, usedDataset: collected.map((c) => `${c.id} (${c.name})`).join("; ") }
         : metaFallback();
     }
 
@@ -1414,18 +1536,22 @@
           return;
         }
         usedDataset = result.usedDataset || "";
-        const { messages } = result;
         const maxOut = deep ? 2800 : 1800;
 
-        // 5) synthesize (streamed)
+        // 5) synthesize (streamed). Data path runs a model-driven "read more rows" loop first.
         const synthStep = liveStep(ui, "synthesize_answer", deep ? "synthesizing across sources…" : "streaming grounded answer…", { state: "run" });
         ui.answer.classList.add("cursor");
+        const onDelta = (full) => { ui.answer.innerHTML = renderMarkdown(full); scrollDown(); };
         let finalText = "";
-        try {
-          finalText = await orStream(messages, 0, (full) => { ui.answer.innerHTML = renderMarkdown(full); scrollDown(); }, maxOut);
-        } catch (streamErr) {
-          finalText = await orComplete(messages, 0, maxOut);
-          ui.answer.innerHTML = renderMarkdown(finalText);
+        if (result.collected) {
+          finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, deep, onDelta, maxOut);
+        } else {
+          try {
+            finalText = await orStream(result.messages, 0, onDelta, maxOut);
+          } catch (streamErr) {
+            finalText = await orComplete(result.messages, 0, maxOut);
+            ui.answer.innerHTML = renderMarkdown(finalText);
+          }
         }
         ui.answer.classList.remove("cursor");
         synthStep.done("answer complete");

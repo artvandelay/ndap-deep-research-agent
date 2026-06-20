@@ -30,6 +30,7 @@ data/logs/
 data/recon/
 data/research_papers.json
 data/sourcedetails/
+data/batch_runs/
 AGENTS.md
 
 # Logs and OS noise
