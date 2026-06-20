@@ -11,7 +11,6 @@ The project is designed for deep-research agents that need to discover relevant 
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
 - A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
-- A response template for traceable NDAP question answering in `SRIT_NDAP_QUERY_RESPONSE_TEMPLATE.md`.
 
 ## Repository Layout
 
