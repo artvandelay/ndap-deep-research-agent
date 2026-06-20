@@ -9,7 +9,7 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search.
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -28,10 +28,16 @@ The project is designed for deep-research agents that need to discover relevant 
 ├── mcp_server.py                     # FastMCP server exposing NDAP tools
 ├── docs/                             # Static GitHub Pages demo
 │   ├── index.html                    # Browser chat UI
-│   └── assets/ndap_index.json        # DB-derived browser search index
+│   └── assets/
+│       ├── ndap_index.json           # DB-derived browser search index
+│       └── ndap_recipes.json         # Per-dataset openapi download recipes (optional)
+├── proxy/                            # Cloudflare Worker CORS proxy (optional, for real numbers)
+│   ├── worker.js
+│   └── wrangler.toml
 ├── scripts/
 │   ├── check_index_coverage.py        # Verify catalogue coverage in data/index.db
 │   ├── export_web_index.py            # Export data/index.db for the Pages demo
+│   ├── export_recipes.py              # Export download recipes for real-numbers mode
 │   └── wait_and_build_index.sh       # Wait for harvest, then rebuild index
 └── data/
     ├── index.db                      # Committed SQLite metadata/search index
@@ -95,13 +101,14 @@ It is a simplified, Hermes-inspired chat interface. It does not embed the full d
 1. asks the selected OpenRouter model to plan a compact search query,
 2. searches a browser-friendly metadata export generated from `data/index.db`,
 3. retrieves candidate dataset records locally in the browser,
-4. asks the model to synthesize a grounded answer from retrieved metadata only.
+4. (optional, real-numbers mode) downloads the chosen dataset's rows and computes the answer,
+5. asks the model to synthesize a grounded answer.
 
-Enter:
+Open Settings (gear icon, top-right) and enter:
 
-- your OpenRouter API key,
-- an OpenRouter model slug such as `openai/gpt-5.5`, `anthropic/claude-sonnet-4.6`, or another model available on your account,
-- an NDAP dataset discovery question.
+- your OpenRouter API key (stored only in your browser's localStorage, sent directly to OpenRouter),
+- an OpenRouter model slug such as `openai/gpt-5.5`, `anthropic/claude-sonnet-4.6`, or another model on your account,
+- optionally, a Data proxy URL to enable real numbers (see below).
 
 Example prompts:
 
@@ -111,12 +118,46 @@ Find district-level school enrolment datasets by social category.
 What datasets could compare crop production across states over time?
 ```
 
-The demo is intentionally metadata-first. It is meant to show the agentic search loop, not to produce final statistical answers from raw observations. For factual values or comparisons, use `download_dataset` after the right dataset has been identified.
+### Discovery mode vs. real-numbers mode
 
-To refresh the static Pages search asset after rebuilding `data/index.db`:
+Without a Data proxy URL the demo is **discovery-only**: it identifies the right datasets but does not fetch raw values. This is the safe default and needs no extra infrastructure.
+
+To make the demo **compute real numbers** in the browser, you need two things:
+
+1. The download recipes asset (per-dataset openapi `API_Key`/indicators/dimensions):
+
+   ```bash
+   python scripts/export_recipes.py   # writes docs/assets/ndap_recipes.json
+   ```
+
+   Note: each recipe embeds the durable NDAP openapi key tied to the harvesting
+   account. Publishing this file exposes those keys — only ship it for a demo
+   where you accept that exposure.
+
+2. A CORS proxy, because NDAP's `/v1/openapi` endpoint sends no
+   `Access-Control-Allow-Origin` header (so browsers block direct calls). Deploy
+   the included free Cloudflare Worker:
+
+   ```bash
+   cd proxy
+   npx wrangler login
+   npx wrangler deploy
+   ```
+
+   Paste the resulting `*.workers.dev` URL into Settings → "Data proxy URL". The
+   Worker is stateless, stores nothing, and only forwards to `loadqa.ndapapi.com`.
+
+In real-numbers mode the agent fetches rows for the selected dataset (paginated,
+capped), hands the most relevant rows to the model as CSV, and the model computes
+the answer with the actual values. The numbers reflect the breakdown encoded in
+the stored recipe (e.g. national/by-dimension); if a requested entity isn't in
+those rows, the model is instructed to say so.
+
+To refresh the static Pages assets after rebuilding `data/index.db`:
 
 ```bash
 python scripts/export_web_index.py
+python scripts/export_recipes.py    # only if using real-numbers mode
 ```
 
 ## Refresh Or Rebuild The Metadata Index

@@ -16,6 +16,11 @@ venv/
 .firecrawl/
 tasks/
 
+# Cloudflare Worker local artifacts
+proxy/node_modules/
+proxy/.wrangler/
+node_modules/
+
 # Generated NDAP artifacts
 data/catalogue.csv
 data/catalogue.json

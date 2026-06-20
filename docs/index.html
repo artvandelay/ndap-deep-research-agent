@@ -357,6 +357,12 @@
       </div>
       <p class="help">Any OpenRouter model, e.g. <code>openai/gpt-5.5</code>, <code>anthropic/claude-sonnet-4.6</code>, <code>moonshotai/kimi-k2.7</code>.</p>
 
+      <label for="proxyInput">Data proxy URL <span style="color:var(--faint);font-weight:500">(optional)</span></label>
+      <div class="field">
+        <input id="proxyInput" placeholder="https://ndap-cors-proxy.…workers.dev" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="help">Enables <b>real numbers</b>: the agent downloads dataset rows through this CORS proxy and computes the answer. Leave blank for discovery-only mode. See <code>proxy/</code> in the repo to deploy one free.</p>
+
       <label for="limitInput">Candidate datasets to retrieve</label>
       <div class="field">
         <input id="limitInput" type="number" min="3" max="12" placeholder="8" />
@@ -372,17 +378,22 @@
 
   <script>
     const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit" };
+    const LS = { key: "ndap.or.key", model: "ndap.or.model", limit: "ndap.or.limit", proxy: "ndap.proxy" };
     const DEFAULT_MODEL = "openai/gpt-5.5";
+    const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
+    const PAGE_SIZE = 1000;       // NDAP openapi page size
+    const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
+    let ndapRecipes = null;       // lazy-loaded on first data fetch
     let busy = false;
 
     const settings = {
       get key() { return localStorage.getItem(LS.key) || ""; },
       get model() { return localStorage.getItem(LS.model) || DEFAULT_MODEL; },
       get limit() { return Math.max(3, Math.min(12, Number(localStorage.getItem(LS.limit) || 8))); },
+      get proxy() { return (localStorage.getItem(LS.proxy) || "").trim().replace(/\/+$/, ""); },
     };
 
     const el = (tag, cls, html) => {
@@ -399,6 +410,7 @@
     function openDrawer() {
       $("key").value = settings.key;
       $("modelInput").value = settings.model;
+      $("proxyInput").value = settings.proxy;
       $("limitInput").value = settings.limit;
       $("savedFlash").textContent = "";
       $("drawer").classList.add("open");
@@ -413,6 +425,7 @@
     function saveSettings() {
       localStorage.setItem(LS.key, $("key").value.trim());
       localStorage.setItem(LS.model, ($("modelInput").value.trim() || DEFAULT_MODEL));
+      localStorage.setItem(LS.proxy, $("proxyInput").value.trim().replace(/\/+$/, ""));
       localStorage.setItem(LS.limit, String(Math.max(3, Math.min(12, Number($("limitInput").value || 8)))));
       refreshKeyPill();
       $("savedFlash").textContent = "Saved ✓";
@@ -526,6 +539,104 @@
       } catch (e) {
         return { search_query: question, reason: `Planner fallback (using raw question): ${e.message}` };
       }
+    }
+
+    /* ---------- Data layer (proxy → NDAP openapi) ---------- */
+    async function loadRecipes() {
+      if (ndapRecipes) return ndapRecipes;
+      const res = await fetch("assets/ndap_recipes.json");
+      if (!res.ok) throw new Error(`recipes fetch failed: ${res.status}`);
+      ndapRecipes = await res.json();
+      return ndapRecipes;
+    }
+
+    function buildNdapUrl(recipe, pageno) {
+      const base = (ndapRecipes && ndapRecipes.base) || "https://loadqa.ndapapi.com/v1/openapi";
+      const ind = encodeURIComponent(recipe.i).replace(/%2C/g, ",");
+      const dim = encodeURIComponent(recipe.d).replace(/%2C/g, ",");
+      return `${base}?API_Key=${encodeURIComponent(recipe.k)}&ind=${ind}&dim=${dim}&pageno=${pageno}`;
+    }
+
+    function proxied(url) {
+      return `${settings.proxy}/?url=${encodeURIComponent(url)}`;
+    }
+
+    async function selectDataset(question, candidates) {
+      const slim = candidates.map((c) => ({ id: c.id, name: c.name, geo: c.geo, years: c.years }));
+      const messages = [
+        { role: "system", content: "Pick the single best dataset to download to answer the question, from the candidates. Return JSON only." },
+        { role: "user", content: `Question:\n${question}\n\nCandidates:\n${JSON.stringify(slim)}\n\nReturn exactly: {"dataset_id": <id>, "reason": "..."}` },
+      ];
+      try {
+        const parsed = extractJson(await orComplete(messages, 0));
+        const pick = candidates.find((c) => String(c.id) === String(parsed.dataset_id)) || candidates[0];
+        return { pick, reason: String(parsed.reason || "Top-ranked candidate.") };
+      } catch (_) {
+        return { pick: candidates[0], reason: "Fallback: top-ranked candidate." };
+      }
+    }
+
+    async function fetchDatasetRows(datasetId, onProgress) {
+      const recipes = await loadRecipes();
+      const recipe = recipes.recipes[String(datasetId)];
+      if (!recipe) throw new Error(`No download recipe for dataset ${datasetId}`);
+
+      let columns = [];
+      const rows = [];
+      let truncated = false;
+      for (let page = 1; page <= MAX_PAGES; page++) {
+        const res = await fetch(proxied(buildNdapUrl(recipe, page)));
+        if (!res.ok) throw new Error(`proxy/NDAP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+        const payload = await res.json();
+        if (payload.IsError) throw new Error(`NDAP error: ${payload.Message || "unknown"}`);
+
+        if (!columns.length) {
+          columns = (payload.Headers?.Items || [])
+            .map((h) => String(h.ID || h.DisplayName || "").trim())
+            .filter(Boolean);
+        }
+        const pageRows = payload.Data || [];
+        for (const r of pageRows) rows.push(r);
+        onProgress?.(rows.length, page);
+
+        if (pageRows.length < PAGE_SIZE) break;
+        if (page === MAX_PAGES) truncated = true;
+      }
+      return { columns, rows, truncated };
+    }
+
+    // NDAP indicator cells are aggregation objects ({avg,sum,min,max,count,…}); flatten to a scalar.
+    function cellValue(v) {
+      if (v && typeof v === "object") {
+        if (v.avg != null) return v.avg;
+        if (v.value != null) return v.value;
+        if (v.sum != null) return v.sum;
+        return "";
+      }
+      return v;
+    }
+
+    function selectRelevantRows(rows, question, max) {
+      if (rows.length <= max) return rows;
+      const terms = tokenize(question);
+      const scored = rows.map((row) => {
+        const blob = Object.values(row).map(cellValue).join(" ").toLowerCase();
+        let s = 0;
+        for (const t of terms) if (blob.includes(t)) s++;
+        return { row, s };
+      });
+      scored.sort((a, b) => b.s - a.s);
+      return scored.slice(0, max).map((x) => x.row);
+    }
+
+    function rowsToCsv(columns, rows) {
+      const esc = (v) => {
+        const s = String(v ?? "");
+        return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+      };
+      const head = columns.join(",");
+      const body = rows.map((r) => columns.map((c) => esc(cellValue(r[c]))).join(",")).join("\n");
+      return `${head}\n${body}`;
     }
 
     /* ---------- UI builders ---------- */
@@ -644,15 +755,55 @@
           return;
         }
 
-        // 4) synthesize (streamed)
+        // 4) optionally download real rows through the proxy
+        const metadataMessages = () => ([
+          { role: "system", content: "You are an NDAP-only research assistant. Answer using ONLY the supplied NDAP metadata. Cite dataset IDs. Use markdown. Do not invent raw values, causal claims, or future predictions. If raw data is needed for a number, say which dataset to download next." },
+          { role: "user", content: `User question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
+        ]);
+
+        let messages;
+        if (settings.proxy) {
+          const selStep = step("select_dataset", "choosing dataset to download…", "");
+          selStep.querySelector(".tool-dot").className = "tool-dot run";
+          ui.procInner.appendChild(selStep); scrollDown();
+          const { pick, reason } = await selectDataset(question, candidates);
+          selStep.querySelector(".tool-dot").className = "tool-dot done";
+          selStep.querySelector(".tool-detail").textContent = `chose ${pick.id} — ${pick.name}`;
+          selStep.appendChild(el("div", "payload", `reason: ${reason}`));
+
+          const dlStep = step("download_dataset", `pulling rows for ${pick.id} via proxy…`, "");
+          dlStep.querySelector(".tool-dot").className = "tool-dot run";
+          ui.procInner.appendChild(dlStep); scrollDown();
+          try {
+            const { columns, rows, truncated } = await fetchDatasetRows(pick.id, (n, p) => {
+              dlStep.querySelector(".tool-detail").textContent = `dataset ${pick.id}: ${n} rows (page ${p})…`;
+            });
+            const used = selectRelevantRows(rows, question, MAX_LLM_ROWS);
+            const csv = rowsToCsv(columns, used);
+            dlStep.querySelector(".tool-dot").className = "tool-dot done";
+            dlStep.querySelector(".tool-detail").textContent =
+              `dataset ${pick.id}: ${rows.length} rows${truncated ? "+ (capped)" : ""}, ${columns.length} cols${used.length < rows.length ? ` · ${used.length} most-relevant sent` : ""}`;
+            dlStep.appendChild(el("div", "payload",
+              `columns: ${columns.join(", ")}\n\n${csv.split("\n").slice(0, 12).join("\n")}${used.length > 11 ? "\n…" : ""}`));
+            scrollDown();
+            messages = [
+              { role: "system", content: "You are an NDAP-only data analyst. Compute the answer ONLY from the supplied CSV rows of one NDAP dataset. Cite the dataset ID, show the exact numbers you used (a small markdown table is ideal), and state the units/year. Do not invent values absent from the rows. If a requested entity (city/year) is not present in the rows, say so explicitly." },
+              { role: "user", content: `Question:\n${question}\n\nDataset ${pick.id} — ${pick.name}\nColumns: ${columns.join(", ")}\nRows provided: ${used.length}${rows.length > used.length ? ` (most relevant of ${rows.length}${truncated ? "+" : ""} fetched)` : ""}\n\nCSV:\n${csv}\n\nAnswer with the actual numbers.` },
+            ];
+          } catch (dataErr) {
+            dlStep.querySelector(".tool-dot").className = "tool-dot done";
+            dlStep.querySelector(".tool-detail").textContent = "data fetch failed — answering from metadata";
+            dlStep.appendChild(el("div", "payload", String(dataErr.message)));
+            messages = metadataMessages();
+          }
+        } else {
+          messages = metadataMessages();
+        }
+
+        // 5) synthesize (streamed)
         const synthStep = step("synthesize_answer", "streaming grounded answer…", "");
         synthStep.querySelector(".tool-dot").className = "tool-dot run";
         ui.procInner.appendChild(synthStep);
-
-        const messages = [
-          { role: "system", content: "You are an NDAP-only research assistant. Answer using ONLY the supplied NDAP metadata. Cite dataset IDs. Use markdown. Do not invent raw values, causal claims, or future predictions. If raw data is needed for a number, say which dataset to download next." },
-          { role: "user", content: `User question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
-        ];
         ui.answer.classList.add("cursor");
         let finalText = "";
         try {
