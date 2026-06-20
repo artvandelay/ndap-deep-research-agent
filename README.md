@@ -167,8 +167,8 @@ For large datasets only a capped sample of the most-relevant rows is shown to
 the model first, but the full set of fetched rows is kept in memory. Alongside
 the sample the model also gets a **data profile** (each filterable dimension and
 its distinct values) and can **request more rows on demand** — by filtering on
-specific dimension values (e.g. a national/"Persons" row, a particular state,
-city, or year) or asking for the next batch. Each request is satisfied by
+specific dimension values (e.g. a pre-aggregated total / national row, a
+particular state, city, or year) or asking for the next batch. Each request is satisfied by
 re-slicing the in-memory rows (no extra network calls), bounded to a few rounds.
 This lets the agent reach rows that keyword relevance alone would miss instead of
 guessing or wrongly aggregating a partial sample.
