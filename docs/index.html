@@ -79,7 +79,7 @@
     .chat-item .ci-del svg { width: 14px; height: 14px; }
     .chat-empty { color: var(--faint); font-size: 12.5px; padding: 16px 10px; text-align: center; line-height: 1.5; }
 
-    .menu-btn { display: none; }
+    .icon-btn.menu-btn { display: none; }
     .sidebar-backdrop { display: none; }
 
     /* Header */
@@ -215,6 +215,35 @@
     }
     .disclaimer strong { color: #b45309; }
     .disclaimer a { color: var(--blue); }
+
+    .inline-link { color: var(--blue); font-weight: 600; text-decoration: none; white-space: nowrap; }
+    .inline-link:hover { text-decoration: underline; }
+
+    .welcome-stats { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: 560px; margin: 0 auto 26px; }
+    .welcome-stats .stat {
+      flex: 1 1 140px; min-width: 118px; background: var(--panel); border: 1px solid var(--line);
+      border-radius: 14px; padding: 14px 12px; box-shadow: 0 1px 2px rgba(25,44,109,.04);
+    }
+    .welcome-stats .stat-num { display: block; font-size: 24px; font-weight: 800; letter-spacing: -0.02em; color: var(--navy); }
+    .welcome-stats .stat-label { display: block; font-size: 11.5px; color: var(--muted); margin-top: 3px; }
+
+    .info-block {
+      max-width: 560px; margin: 0 auto 26px; text-align: left;
+      background: #fff; border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px 18px; font-size: 13.5px; line-height: 1.55; color: var(--text);
+      box-shadow: 0 1px 2px rgba(25,44,109,.04);
+    }
+    .info-block > strong { display: block; color: var(--navy); margin-bottom: 8px; font-size: 14px; }
+    .info-block ul { margin: 0; padding-left: 18px; color: var(--muted); }
+    .info-block li { margin: 5px 0; }
+    .info-block .modes { margin: 12px 0 0; display: flex; flex-direction: column; gap: 8px; }
+    .info-block .mode-line { display: flex; gap: 9px; align-items: flex-start; font-size: 13px; line-height: 1.5; color: var(--text); }
+    .info-block .mode-line strong { color: var(--blue); }
+    .info-block .mode-ico { flex: 0 0 auto; margin-top: 2px; color: var(--blue); }
+    .info-block .mode-ico svg { width: 14px; height: 14px; display: block; }
+    .info-block p.info-caveat { color: var(--muted); font-size: 12.5px; margin: 10px 0 0; max-width: none; line-height: 1.55; }
+
+    .privacy-note { max-width: 560px; margin: 16px auto 0; font-size: 11.5px; color: var(--faint); line-height: 1.5; }
 
     /* Messages */
     .msg { display: flex; gap: 12px; }
@@ -389,6 +418,7 @@
     .send:disabled { opacity: .4; cursor: not-allowed; transform: none; }
     .send svg { width: 18px; height: 18px; }
     .composer-hint { max-width: 860px; margin: 8px auto 0; color: var(--faint); font-size: 11.5px; text-align: center; }
+    .composer-disclaimer { max-width: 860px; margin: 3px auto 0; color: #b45309; font-size: 11px; text-align: center; opacity: .85; }
 
     /* Settings drawer */
     .backdrop {
@@ -427,7 +457,7 @@
     .saved-flash { font-size:12px; color: var(--green); margin-top:10px; height:14px; }
 
     @media (max-width: 860px) {
-      .menu-btn { display: grid; }
+      .icon-btn.menu-btn { display: grid; }
       .sidebar {
         position: fixed; top: 0; left: 0; bottom: 0; z-index: 60;
         transform: translateX(-100%); transition: transform .24s ease;
@@ -453,7 +483,7 @@
       <div class="sidebar-head">
         <div class="sidebar-brand">
           <div class="glyph">N</div>
-          <span>NDAP Research</span>
+          <span>Chats</span>
         </div>
         <button class="new-chat-btn" id="newChatSide" type="button">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14M5 12h14"></path></svg>
@@ -472,7 +502,6 @@
         <div class="glyph">N</div>
         <div>
           <h1>NDAP Deep Research Agent</h1>
-          <span>Grounded dataset discovery</span>
         </div>
       </div>
       <div class="spacer"></div>
@@ -489,26 +518,36 @@
     <div class="scroll" id="scroll">
       <div class="thread" id="thread">
         <div class="welcome" id="welcome">
-          <h2 class="big">Ask anything about India's public data</h2>
-          <p>This is an AI research assistant for <strong>NDAP</strong> — NITI Aayog's National Data &amp; Analytics Platform. Ask a question in plain English and it searches across <strong><span id="welcomeCount">6,600+</span> official Indian government datasets</strong>, picks the most relevant ones, pulls the actual numbers, and writes a clear answer with every figure linked back to its source dataset — no guesswork.</p>
-          <p class="welcome-sub">It's good at comparing trends over time, figuring out which datasets to combine for a question, and returning real, cited figures. Try a starting point:</p>
-          <div class="chips" id="chips"></div>
-          <div class="catalog-cta">
-            <span class="kn-ico" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"></path><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"></path>
-              </svg>
-            </span>
-            <div>
-              <strong>Not sure what to ask?</strong> Browse the official <strong>NDAP data catalog</strong> to flip through the <span id="catalogCount">6,600+</span> datasets — sectors, indicators and time coverage — to spark ideas, then come back and ask in plain English.
-              <div class="kn-actions">
-                <a class="catalog-link" href="https://ndap.niti.gov.in/" target="_blank" rel="noopener">
-                  Open the NDAP catalog
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><path d="M7 17 17 7"></path><path d="M7 7h10v10"></path></svg>
-                </a>
+          <h2 class="big">Ask the agent about Indian Govt published data</h2>
+          <p>Built on <strong>NDAP</strong>, NITI Aayog's National Data and Analytics Platform. Ask in plain English and it pulls real figures from the public catalog, each linked to its source. <a class="inline-link" href="https://ndap.niti.gov.in/" target="_blank" rel="noopener">Browse the catalog &rarr;</a></p>
+
+          <div class="welcome-stats" id="welcomeStats">
+            <div class="stat"><span class="stat-num" id="statDatasets">6,621</span><span class="stat-label">official datasets</span></div>
+            <div class="stat"><span class="stat-num" id="statMinistries">113</span><span class="stat-label">ministries &amp; sources</span></div>
+            <div class="stat"><span class="stat-num" id="statSectors">31</span><span class="stat-label">sectors</span></div>
+          </div>
+
+          <div class="info-block">
+            <strong>What you can do here</strong>
+            <ul>
+              <li>Get exact figures with every number linked back to the dataset it came from.</li>
+              <li>See how values move over time, across states, or between categories.</li>
+              <li>Pinpoint the right datasets for a topic and how they fit together.</li>
+            </ul>
+            <div class="modes">
+              <div class="mode-line">
+                <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg></span>
+                <span><strong>Fast</strong> gives a quick grounded answer from the top matching datasets.</span>
+              </div>
+              <div class="mode-line">
+                <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
+                <span><strong>Deep</strong> reads more datasets and reflects across rounds for harder, multi-part questions.</span>
               </div>
             </div>
           </div>
+
+          <p class="welcome-sub">Try a starting point:</p>
+          <div class="chips" id="chips"></div>
           <div class="keynote" id="keyNote">
             <span class="kn-ico" aria-hidden="true">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -523,9 +562,7 @@
               </div>
             </div>
           </div>
-          <p class="disclaimer">
-            <strong>Disclaimer:</strong> This is an experimental, community-built project — <strong>not production-ready</strong> and <strong>not an official NDAP, NITI Aayog, or Government of India effort</strong>. Answers are AI-generated and may be incomplete or wrong. Always verify figures against the source datasets on the <a href="https://ndap.niti.gov.in/" target="_blank" rel="noopener">official NDAP platform</a> before relying on them.
-          </p>
+          <p class="privacy-note">Chats and your API key stay in this browser only. There's no backend, so nothing is stored on a server.</p>
         </div>
       </div>
     </div>
@@ -553,6 +590,7 @@
         </button>
       </div>
       <div class="composer-hint">Enter to send · Shift+Enter for newline · Fast/Deep is saved per chat · Key &amp; model live in Settings (top-right)</div>
+      <div class="composer-disclaimer">Prototype · not an official NDAP, NITI Aayog, or Government of India product. Verify figures before relying on them.</div>
     </div>
   </div>
   </div>
@@ -788,7 +826,7 @@
         `| Research mode | ${prov.mode} |`,
         `| Model | ${modelLine} |`,
         "",
-        `Generated with [${prov.appName}](${prov.appUrl}) by [${prov.author}](${prov.authorUrl}).`,
+        `Made for fun by [${prov.author}](${prov.authorUrl}).`,
       ].join("\n");
     }
 
@@ -808,7 +846,7 @@
         `Research mode: ${prov.mode}`,
         `Model: ${modelLine}`,
         "",
-        `Generated with ${prov.appName} by ${prov.author}.`,
+        `Made for fun by ${prov.author}.`,
       ].join("\n");
     }
 
@@ -829,7 +867,7 @@
       <tr><th>Research mode</th><td>${escapeHtml(prov.mode)}</td></tr>
       <tr><th>Model</th><td>${modelLine}</td></tr>
     </table>
-    <p class="cite-note">Generated with <a href="${escapeHtml(prov.appUrl)}">${escapeHtml(prov.appName)}</a> by <a href="${escapeHtml(prov.authorUrl)}">${escapeHtml(prov.author)}</a>.</p>
+    <p class="cite-note">Made for fun by <a href="${escapeHtml(prov.authorUrl)}">${escapeHtml(prov.author)}</a>.</p>
   </footer>`;
     }
 
@@ -1159,10 +1197,12 @@
       const pill = $("indexPill");
       if (!ndapIndex) return;
       const count = ndapIndex.datasetCount.toLocaleString();
-      const wc = $("welcomeCount");
-      if (wc) wc.textContent = count;
-      const cc = $("catalogCount");
-      if (cc) cc.textContent = count;
+      const sd = $("statDatasets");
+      if (sd) sd.textContent = count;
+      const sm = $("statMinistries");
+      if (sm && ndapIndex.ministryCount) sm.textContent = ndapIndex.ministryCount.toLocaleString();
+      const ss = $("statSectors");
+      if (ss && ndapIndex.sectorCount) ss.textContent = ndapIndex.sectorCount.toLocaleString();
       const note = $("keyNote");
       if (settings.key) {
         pill.className = "pill ok";
@@ -1180,6 +1220,15 @@
       const res = await fetch("assets/ndap_index.json");
       if (!res.ok) throw new Error(`index fetch failed: ${res.status}`);
       ndapIndex = await res.json();
+      const ministries = new Set(), sectors = new Set();
+      for (const item of (ndapIndex.items || [])) {
+        const m = String(item.ministry || "").trim();
+        const s = String(item.sector || "").trim();
+        if (m) ministries.add(m);
+        if (s) sectors.add(s);
+      }
+      ndapIndex.ministryCount = ministries.size;
+      ndapIndex.sectorCount = sectors.size;
       refreshKeyPill();
     }
 
