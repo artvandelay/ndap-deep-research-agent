@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/html2pdf.js@0.10.2/dist/html2pdf.bundle.min.js"></script>
   <style>
     :root {
       color-scheme: light;
@@ -297,12 +298,32 @@
     .usage-foot .u-chip.cost b { color: var(--blue); }
     .usage-foot .u-note { color: var(--faint); }
 
-    .answer-tools { display: flex; gap: 8px; margin-top: 10px; }
+    .answer-tools { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; align-items: center; }
     .ghost {
       border: 1px solid var(--line); background: #fff; color: var(--muted);
       border-radius: 9px; padding: 6px 11px; font-size: 12px; cursor: pointer;
     }
     .ghost:hover { color: var(--blue); border-color: var(--blue); }
+    .export-wrap { position: relative; display: inline-flex; }
+    .export-menu {
+      position: absolute; top: calc(100% + 6px); right: 0;
+      min-width: 196px; background: #fff; border: 1px solid var(--line);
+      border-radius: 12px; box-shadow: 0 10px 36px rgba(25,44,109,.12);
+      padding: 6px; z-index: 30; display: none;
+    }
+    .export-wrap.open .export-menu { display: block; }
+    .export-menu button {
+      display: block; width: 100%; text-align: left;
+      border: 0; background: transparent; padding: 8px 10px;
+      border-radius: 8px; font: inherit; font-size: 12.5px;
+      color: var(--text); cursor: pointer;
+    }
+    .export-menu button:hover { background: #f2f5fb; color: var(--blue); }
+    .export-menu button:disabled { opacity: .45; cursor: not-allowed; }
+    .chat-item .ci-export { opacity: 0; border: 0; background: transparent; color: var(--faint); cursor: pointer; padding: 3px; border-radius: 6px; flex: 0 0 auto; display: grid; place-items: center; transition: opacity .15s; }
+    .chat-item:hover .ci-export, .chat-item.active .ci-export { opacity: 1; }
+    .chat-item .ci-export:hover { color: var(--blue); background: rgba(46,92,246,.08); }
+    .chat-item .ci-export svg { width: 14px; height: 14px; }
     .err { color: var(--danger); border:1px solid rgba(212,53,28,.3); background: rgba(212,53,28,.06); border-radius: 12px; padding: 12px 14px; }
 
     /* Composer */
@@ -432,6 +453,7 @@
       </div>
       <div class="spacer"></div>
       <div id="indexPill" class="pill"><span class="dot"></span><span id="indexStatus">Loading index…</span></div>
+      <div id="headerExport"></div>
       <button id="openSettings" class="icon-btn" title="Settings" aria-label="Settings">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="3"></circle>
@@ -617,6 +639,450 @@
       }
     };
     const scrollDown = () => { const s = $("scroll"); s.scrollTop = s.scrollHeight; };
+
+    /* ---------- Export ---------- */
+    const EXPORT_META = {
+      author: "Jigar",
+      authorUrl: "https://github.com/artvandelay",
+      appName: "NDAP Deep Research Agent",
+      appUrl: "https://artvandelay.github.io/ndap-deep-research-agent/",
+      repoUrl: "https://github.com/artvandelay/ndap-deep-research-agent",
+    };
+    const EXPORT_FORMATS = [
+      { id: "md", label: "Markdown (.md)", ext: "md", mime: "text/markdown;charset=utf-8" },
+      { id: "html", label: "HTML (.html)", ext: "html", mime: "text/html;charset=utf-8" },
+      { id: "pdf", label: "PDF (.pdf)", ext: "pdf", mime: "application/pdf" },
+      { id: "txt", label: "Plain text (.txt)", ext: "txt", mime: "text/plain;charset=utf-8" },
+      { id: "json", label: "JSON (.json)", ext: "json", mime: "application/json;charset=utf-8" },
+    ];
+
+    function safeFilename(name) {
+      const s = String(name || "chat").replace(/[^\w\s-]/g, "").replace(/\s+/g, "-").replace(/-+/g, "-").replace(/^-|-$/g, "").slice(0, 60);
+      return s || "chat";
+    }
+
+    function exportStamp(ts) {
+      return new Date(ts || Date.now()).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" });
+    }
+
+    function isoStamp(ts) {
+      return new Date(ts || Date.now()).toISOString();
+    }
+
+    function openRouterModelUrl(modelId) {
+      const id = String(modelId || settings.model || DEFAULT_MODEL).trim().replace(/^\/+/, "");
+      return `https://openrouter.ai/${id}`;
+    }
+
+    function resolveTurnModel(turn, chat) {
+      return (turn && turn.model) || chat.model || settings.model || DEFAULT_MODEL;
+    }
+
+    function exportProvenance(chat, turn) {
+      const exportedAtMs = Date.now();
+      const model = turn ? resolveTurnModel(turn, chat) : (chat.model || settings.model || DEFAULT_MODEL);
+      const modelsUsed = turn
+        ? [model]
+        : [...new Set(chat.transcript.map((t) => resolveTurnModel(t, chat)))];
+      return {
+        title: turn ? titleFromQuestion(turn.q) : (chat.title || "NDAP Research Chat"),
+        author: EXPORT_META.author,
+        authorUrl: EXPORT_META.authorUrl,
+        appName: EXPORT_META.appName,
+        appUrl: EXPORT_META.appUrl,
+        repoUrl: EXPORT_META.repoUrl,
+        chatId: chat.id,
+        mode: chat.mode || "fast",
+        model,
+        modelsUsed,
+        modelUrl: openRouterModelUrl(model),
+        createdAt: isoStamp(chat.createdAt),
+        updatedAt: isoStamp(chat.updatedAt || chat.createdAt),
+        answeredAt: turn && turn.answeredAt ? isoStamp(turn.answeredAt) : null,
+        exportedAt: isoStamp(exportedAtMs),
+        exportedAtMs,
+      };
+    }
+
+    function markdownFrontmatter(prov) {
+      const lines = [
+        "---",
+        `title: ${JSON.stringify(prov.title)}`,
+        `author: ${JSON.stringify(prov.author)}`,
+        `author_url: ${prov.authorUrl}`,
+        `source: ${prov.appUrl}`,
+        `repository: ${prov.repoUrl}`,
+        `exported_at: ${prov.exportedAt}`,
+        `chat_created_at: ${prov.createdAt}`,
+        `chat_updated_at: ${prov.updatedAt}`,
+        `mode: ${prov.mode}`,
+        `model: ${prov.model}`,
+        `model_url: ${prov.modelUrl}`,
+      ];
+      if (prov.answeredAt) lines.push(`answered_at: ${prov.answeredAt}`);
+      if (prov.modelsUsed.length > 1) lines.push(`models_used: ${JSON.stringify(prov.modelsUsed)}`);
+      lines.push("---");
+      return lines.join("\n");
+    }
+
+    function citationMarkdown(prov) {
+      const modelLine = prov.modelsUsed.length > 1
+        ? prov.modelsUsed.map((m) => `[${m}](${openRouterModelUrl(m)})`).join(", ")
+        : `[${prov.model}](${prov.modelUrl})`;
+      return [
+        "---",
+        "",
+        "## Source & reproducibility",
+        "",
+        "| Field | Value |",
+        "| --- | --- |",
+        `| Author | [${prov.author}](${prov.authorUrl}) |`,
+        `| Application | [${prov.appName}](${prov.appUrl}) |`,
+        `| Repository | [${prov.repoUrl.replace("https://", "")}](${prov.repoUrl}) |`,
+        `| Exported | ${prov.exportedAt} |`,
+        `| Chat created | ${prov.createdAt} |`,
+        `| Chat updated | ${prov.updatedAt} |`,
+        `| Research mode | ${prov.mode} |`,
+        `| Model | ${modelLine} |`,
+        "",
+        `Generated with [${prov.appName}](${prov.appUrl}) by [${prov.author}](${prov.authorUrl}).`,
+      ].join("\n");
+    }
+
+    function citationText(prov) {
+      const modelLine = prov.modelsUsed.length > 1
+        ? prov.modelsUsed.map((m) => `${m} (${openRouterModelUrl(m)})`).join("; ")
+        : `${prov.model} (${prov.modelUrl})`;
+      return [
+        "Source & reproducibility",
+        "-".repeat(24),
+        `Author: ${prov.author} (${prov.authorUrl})`,
+        `Application: ${prov.appName} (${prov.appUrl})`,
+        `Repository: ${prov.repoUrl}`,
+        `Exported: ${prov.exportedAt}`,
+        `Chat created: ${prov.createdAt}`,
+        `Chat updated: ${prov.updatedAt}`,
+        `Research mode: ${prov.mode}`,
+        `Model: ${modelLine}`,
+        "",
+        `Generated with ${prov.appName} by ${prov.author}.`,
+      ].join("\n");
+    }
+
+    function citationHtml(prov) {
+      const modelLine = prov.modelsUsed.length > 1
+        ? prov.modelsUsed.map((m) => `<a href="${escapeHtml(openRouterModelUrl(m))}">${escapeHtml(m)}</a>`).join(", ")
+        : `<a href="${escapeHtml(prov.modelUrl)}">${escapeHtml(prov.model)}</a>`;
+      return `
+  <footer class="cite-footer">
+    <h2>Source &amp; reproducibility</h2>
+    <table>
+      <tr><th>Author</th><td><a href="${escapeHtml(prov.authorUrl)}">${escapeHtml(prov.author)}</a></td></tr>
+      <tr><th>Application</th><td><a href="${escapeHtml(prov.appUrl)}">${escapeHtml(prov.appName)}</a></td></tr>
+      <tr><th>Repository</th><td><a href="${escapeHtml(prov.repoUrl)}">${escapeHtml(prov.repoUrl.replace("https://", ""))}</a></td></tr>
+      <tr><th>Exported</th><td><time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time></td></tr>
+      <tr><th>Chat created</th><td><time datetime="${escapeHtml(prov.createdAt)}">${escapeHtml(prov.createdAt)}</time></td></tr>
+      <tr><th>Chat updated</th><td><time datetime="${escapeHtml(prov.updatedAt)}">${escapeHtml(prov.updatedAt)}</time></td></tr>
+      <tr><th>Research mode</th><td>${escapeHtml(prov.mode)}</td></tr>
+      <tr><th>Model</th><td>${modelLine}</td></tr>
+    </table>
+    <p class="cite-note">Generated with <a href="${escapeHtml(prov.appUrl)}">${escapeHtml(prov.appName)}</a> by <a href="${escapeHtml(prov.authorUrl)}">${escapeHtml(prov.author)}</a>.</p>
+  </footer>`;
+    }
+
+    function htmlHeadMeta(prov) {
+      return `
+  <meta name="author" content="${escapeHtml(prov.author)}" />
+  <meta name="generator" content="${escapeHtml(prov.appName)}" />
+  <meta name="application-name" content="${escapeHtml(prov.appName)}" />
+  <meta name="dcterms.created" content="${escapeHtml(prov.createdAt)}" />
+  <meta name="dcterms.modified" content="${escapeHtml(prov.updatedAt)}" />
+  <meta name="dcterms.date" content="${escapeHtml(prov.exportedAt)}" />
+  <meta name="citation_author" content="${escapeHtml(prov.author)}" />
+  <meta name="citation_online_date" content="${escapeHtml(prov.exportedAt.slice(0, 10))}" />
+  <meta name="citation_public_url" content="${escapeHtml(prov.appUrl)}" />
+  <meta name="ndap-export-model" content="${escapeHtml(prov.model)}" />
+  <meta name="ndap-export-model-url" content="${escapeHtml(prov.modelUrl)}" />
+  <meta name="ndap-export-mode" content="${escapeHtml(prov.mode)}" />
+  <link rel="canonical" href="${escapeHtml(prov.appUrl)}" />`;
+    }
+
+    function buildTurnMarkdown(q, a, prov) {
+      const body = `## Question\n\n${q}\n\n## Answer\n\n${a}\n`;
+      return prov ? `${markdownFrontmatter(prov)}\n\n${body}\n${citationMarkdown(prov)}` : body;
+    }
+
+    function buildSingleTurnMarkdown(chat, turn) {
+      const prov = exportProvenance(chat, turn);
+      return `${markdownFrontmatter(prov)}\n\n# ${prov.title}\n\n${buildTurnMarkdown(turn.q, turn.a)}\n${citationMarkdown(prov)}`.trim();
+    }
+
+    function buildChatMarkdown(chat) {
+      const prov = exportProvenance(chat);
+      let md = `${markdownFrontmatter(prov)}\n\n# ${prov.title}\n\n`;
+      for (const t of chat.transcript) {
+        md += buildTurnMarkdown(t.q, t.a) + "\n---\n\n";
+      }
+      md += citationMarkdown(prov);
+      return md.trim();
+    }
+
+    function buildChatText(chat) {
+      const prov = exportProvenance(chat);
+      let txt = `${prov.title}\n${"=".repeat(prov.title.length)}\n\n`;
+      chat.transcript.forEach((t, i) => {
+        txt += `Question ${i + 1}\n${"-".repeat(12)}\n${t.q}\n\nAnswer\n${"-".repeat(12)}\n${t.a}\n\n`;
+      });
+      txt += `\n${citationText(prov)}`;
+      return txt.trim();
+    }
+
+    function buildChatJson(chat) {
+      const prov = exportProvenance(chat);
+      return JSON.stringify({
+        export: prov,
+        transcript: chat.transcript.map((t) => ({
+          q: t.q,
+          a: t.a,
+          model: resolveTurnModel(t, chat),
+          modelUrl: openRouterModelUrl(resolveTurnModel(t, chat)),
+          answeredAt: t.answeredAt ? isoStamp(t.answeredAt) : null,
+        })),
+      }, null, 2);
+    }
+
+    function exportHtmlStyles() {
+      return `
+        body { font-family: Inter, ui-sans-serif, system-ui, sans-serif; color: #1c2433; line-height: 1.55; max-width: 820px; margin: 0 auto; padding: 32px 24px; }
+        h1 { font-size: 1.6rem; margin: 0 0 8px; color: #192c6d; }
+        .meta { color: #8b94a3; font-size: 0.92rem; margin-bottom: 28px; }
+        .turn { margin-bottom: 28px; padding-bottom: 24px; border-bottom: 1px solid #e2e4e7; }
+        .turn:last-child { border-bottom: 0; }
+        .q-label, .a-label { font-size: 0.72rem; text-transform: uppercase; letter-spacing: .06em; color: #8b94a3; font-weight: 700; margin-bottom: 6px; }
+        .question { font-weight: 600; margin-bottom: 16px; white-space: pre-wrap; }
+        .answer { color: #1c2433; }
+        .answer h1, .answer h2, .answer h3 { color: #192c6d; }
+        .answer a { color: #2e5cf6; }
+        .answer blockquote { border-left: 3px solid #2e5cf6; margin: 10px 0; padding: 2px 14px; color: #5b6573; }
+        .answer table { border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 0.92rem; }
+        .answer th, .answer td { border: 1px solid #e2e4e7; padding: 6px 10px; text-align: left; }
+        .answer th { background: #f7f9fc; }
+        .answer pre { background: #f7f9fc; border: 1px solid #e2e4e7; border-radius: 8px; padding: 12px; overflow-x: auto; }
+        .cite-footer { margin-top: 36px; padding-top: 24px; border-top: 1px solid #e2e4e7; font-size: 0.92rem; }
+        .cite-footer h2 { font-size: 0.95rem; text-transform: uppercase; letter-spacing: .05em; color: #8b94a3; margin: 0 0 12px; }
+        .cite-footer table { border-collapse: collapse; width: 100%; margin-bottom: 12px; }
+        .cite-footer th, .cite-footer td { border: 1px solid #e2e4e7; padding: 6px 10px; text-align: left; vertical-align: top; }
+        .cite-footer th { width: 28%; background: #f7f9fc; color: #5b6573; }
+        .cite-note { color: #8b94a3; margin: 0; }
+      `;
+    }
+
+    function buildChatHtml(chat) {
+      const prov = exportProvenance(chat);
+      const title = escapeHtml(prov.title);
+      const turns = chat.transcript.map((t) => `
+        <section class="turn">
+          <div class="q-label">Question</div>
+          <div class="question">${escapeHtml(t.q)}</div>
+          <div class="a-label">Answer</div>
+          <div class="answer">${renderMarkdown(t.a)}</div>
+        </section>`).join("");
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>${htmlHeadMeta(prov)}
+  <style>${exportHtmlStyles()}</style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <p class="meta">Exported <time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time> · ${escapeHtml(prov.mode)} mode · Model: <a href="${escapeHtml(prov.modelUrl)}">${escapeHtml(prov.model)}</a></p>
+  ${turns}
+  ${citationHtml(prov)}
+</body>
+</html>`;
+    }
+
+    function buildTurnHtml(q, a, chat) {
+      const turn = { q, a };
+      const prov = exportProvenance(chat, turn);
+      const title = escapeHtml(prov.title);
+      const turns = `
+        <section class="turn">
+          <div class="q-label">Question</div>
+          <div class="question">${escapeHtml(q)}</div>
+          <div class="a-label">Answer</div>
+          <div class="answer">${renderMarkdown(a)}</div>
+        </section>`;
+      return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${title}</title>${htmlHeadMeta(prov)}
+  <style>${exportHtmlStyles()}</style>
+</head>
+<body>
+  <h1>${title}</h1>
+  <p class="meta">Exported <time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time> · Model: <a href="${escapeHtml(prov.modelUrl)}">${escapeHtml(prov.model)}</a></p>
+  ${turns}
+  ${citationHtml(prov)}
+</body>
+</html>`;
+    }
+
+    function downloadFile(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    }
+
+    async function exportPdfFromHtml(html, filename, prov) {
+      if (typeof html2pdf !== "function") throw new Error("PDF export is still loading — try again in a moment.");
+      const host = document.createElement("div");
+      host.style.position = "fixed";
+      host.style.left = "-10000px";
+      host.style.top = "0";
+      host.style.width = "794px";
+      host.style.background = "#fff";
+      host.innerHTML = html.replace(/^[\s\S]*<body[^>]*>/i, "").replace(/<\/body>[\s\S]*$/i, "");
+      document.body.appendChild(host);
+      try {
+        const pdf = await html2pdf().set({
+          margin: [12, 12, 12, 12],
+          filename,
+          image: { type: "jpeg", quality: 0.95 },
+          html2canvas: { scale: 2, useCORS: true },
+          jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
+        }).from(host).toPdf().get("pdf");
+        if (prov) {
+          pdf.setProperties({
+            title: prov.title,
+            author: `${prov.author} — ${prov.appName}`,
+            subject: `${prov.appName} (${prov.mode} mode, ${prov.model})`,
+            keywords: [prov.model, prov.mode, prov.appName, "NDAP", prov.author].join(", "),
+            creator: `${prov.appName} (${prov.appUrl})`,
+          });
+        }
+        pdf.save(filename);
+      } finally {
+        host.remove();
+      }
+    }
+
+    async function runExport(format, chat, turn) {
+      const base = safeFilename(turn ? titleFromQuestion(turn.q) : (chat.title || "ndap-chat"));
+      const spec = EXPORT_FORMATS.find((f) => f.id === format);
+      if (!spec) return;
+      const prov = exportProvenance(chat, turn || null);
+      const payloadChat = turn
+        ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
+        : chat;
+      if (format === "md") {
+        downloadFile(`${base}.${spec.ext}`, turn ? buildSingleTurnMarkdown(chat, turn) : buildChatMarkdown(payloadChat), spec.mime);
+      } else if (format === "txt") {
+        downloadFile(`${base}.${spec.ext}`, buildChatText(payloadChat), spec.mime);
+      } else if (format === "json") {
+        downloadFile(`${base}.${spec.ext}`, buildChatJson(payloadChat), spec.mime);
+      } else if (format === "html") {
+        downloadFile(`${base}.${spec.ext}`, turn ? buildTurnHtml(turn.q, turn.a, chat) : buildChatHtml(payloadChat), spec.mime);
+      } else if (format === "pdf") {
+        const html = turn ? buildTurnHtml(turn.q, turn.a, chat) : buildChatHtml(payloadChat);
+        await exportPdfFromHtml(html, `${base}.${spec.ext}`, prov);
+      }
+    }
+
+    function createExportMenu({ getChat, getTurn, disabled }) {
+      const wrap = el("div", "export-wrap");
+      const btn = el("button", "ghost", "Export");
+      btn.type = "button";
+      btn.title = "Export conversation";
+      const menu = el("div", "export-menu");
+      menu.setAttribute("role", "menu");
+      for (const fmt of EXPORT_FORMATS) {
+        const item = el("button", "", fmt.label);
+        item.type = "button";
+        item.setAttribute("role", "menuitem");
+        item.onclick = async (e) => {
+          e.stopPropagation();
+          wrap.classList.remove("open");
+          const chat = getChat();
+          if (!chat || !chat.transcript.length) return;
+          const turn = getTurn ? getTurn() : null;
+          item.disabled = true;
+          const prev = item.textContent;
+          item.textContent = "Exporting…";
+          try {
+            await runExport(fmt.id, chat, turn);
+          } catch (err) {
+            alert(friendlyError(err));
+          } finally {
+            item.disabled = false;
+            item.textContent = prev;
+          }
+        };
+        menu.appendChild(item);
+      }
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        if (disabled && disabled()) return;
+        const open = wrap.classList.contains("open");
+        document.querySelectorAll(".export-wrap.open").forEach((w) => w.classList.remove("open"));
+        if (!open) wrap.classList.add("open");
+      };
+      wrap.appendChild(btn);
+      wrap.appendChild(menu);
+      return wrap;
+    }
+
+    function createHeaderExportMenu() {
+      const host = $("headerExport");
+      if (!host) return;
+      host.innerHTML = "";
+      const wrap = createExportMenu({
+        getChat: () => currentChat(),
+        disabled: () => !currentChat() || !currentChat().transcript.length,
+      });
+      wrap.querySelector(".ghost").className = "icon-btn";
+      wrap.querySelector(".icon-btn").innerHTML = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>`;
+      wrap.querySelector(".icon-btn").title = "Export chat";
+      wrap.querySelector(".icon-btn").setAttribute("aria-label", "Export chat");
+      host.appendChild(wrap);
+    }
+
+    function createAnswerTools(question, markdownText) {
+      const tools = el("div", "answer-tools");
+      const copyBtn = el("button", "ghost", "Copy");
+      copyBtn.type = "button";
+      copyBtn.onclick = () => {
+        navigator.clipboard.writeText(markdownText || "");
+        copyBtn.textContent = "Copied ✓";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1400);
+      };
+      tools.appendChild(copyBtn);
+      tools.appendChild(createExportMenu({
+        getChat: () => currentChat(),
+        getTurn: () => {
+          const cc = currentChat();
+          if (!cc) return { q: question, a: markdownText || "", model: settings.model };
+          const hit = [...cc.transcript].reverse().find((t) => t.q === question);
+          return hit || { q: question, a: markdownText || "", model: settings.model };
+        },
+        disabled: () => !question,
+      }));
+      return tools;
+    }
+
+    document.addEventListener("click", () => {
+      document.querySelectorAll(".export-wrap.open").forEach((w) => w.classList.remove("open"));
+    });
 
     /* ---------- Settings drawer ---------- */
     function openDrawer() {
@@ -828,8 +1294,9 @@
       const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
       cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
       if (cc.convo.length > MAX_TURNS * 2) cc.convo = cc.convo.slice(-MAX_TURNS * 2);
-      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS) });
+      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), model: settings.model, answeredAt: Date.now() });
       if (cc.transcript.length > MAX_SAVED_TURNS) cc.transcript = cc.transcript.slice(-MAX_SAVED_TURNS);
+      cc.model = settings.model;
       convo = cc.convo; transcript = cc.transcript;
       if (!cc.title && cc.transcript.length) cc.title = titleFromQuestion(question);
       cc.updatedAt = Date.now();
@@ -950,7 +1417,7 @@
         return;
       }
       thread.innerHTML = "";
-      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.a); }
+      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.q, t.a); }
       scrollDown();
     }
 
@@ -978,6 +1445,23 @@
         const item = el("div", "chat-item" + (c.id === currentChatId ? " active" : ""));
         const title = el("div", "ci-title", escapeHtml(c.title || "New chat"));
         item.appendChild(title);
+        const exportWrap = createExportMenu({
+          getChat: () => c,
+          disabled: () => !c.transcript.length,
+        });
+        const exportBtn = exportWrap.querySelector("button");
+        exportBtn.className = "ci-export";
+        exportBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>';
+        exportBtn.title = "Export chat";
+        exportBtn.setAttribute("aria-label", "Export chat");
+        exportBtn.onclick = (e) => {
+          e.stopPropagation();
+          if (!c.transcript.length) return;
+          const open = exportWrap.classList.contains("open");
+          document.querySelectorAll(".export-wrap.open").forEach((w) => w.classList.remove("open"));
+          if (!open) exportWrap.classList.add("open");
+        };
+        item.appendChild(exportWrap);
         const del = el("button", "ci-del", '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6"></path></svg>');
         del.title = "Delete chat";
         del.onclick = (e) => { e.stopPropagation(); deleteChat(c.id); };
@@ -991,18 +1475,14 @@
     function closeSidebar() { $("sidebar").classList.remove("open"); $("sidebarBackdrop").classList.remove("open"); }
     function toggleSidebar() { $("sidebar").classList.contains("open") ? closeSidebar() : openSidebar(); }
 
-    function addRestoredAnswer(markdownText) {
+    function addRestoredAnswer(question, markdownText) {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
       const body = el("div", "body");
       body.appendChild(el("div", "who", "Agent"));
       const answer = el("div", "answer");
       renderInto(answer, markdownText || "");
-      const tools = el("div", "answer-tools");
-      const copyBtn = el("button", "ghost", "Copy");
-      copyBtn.onclick = () => { navigator.clipboard.writeText(markdownText || ""); copyBtn.textContent = "Copied ✓"; setTimeout(() => copyBtn.textContent = "Copy", 1400); };
-      tools.appendChild(copyBtn);
-      answer.appendChild(tools);
+      answer.appendChild(createAnswerTools(question, markdownText));
       body.appendChild(answer);
       m.appendChild(body);
       $("thread").appendChild(m);
@@ -1611,12 +2091,7 @@
 
         rememberTurn(question, usedDataset, finalText);
 
-        // answer tools
-        const tools = el("div", "answer-tools");
-        const copyBtn = el("button", "ghost", "Copy");
-        copyBtn.onclick = () => { navigator.clipboard.writeText(finalText); copyBtn.textContent = "Copied ✓"; setTimeout(() => copyBtn.textContent = "Copy", 1400); };
-        tools.appendChild(copyBtn);
-        ui.answer.appendChild(tools);
+        ui.answer.appendChild(createAnswerTools(question, finalText));
       } catch (e) {
         ui.answer.classList.remove("cursor");
         ui.procMeta.textContent = "error";
@@ -1683,6 +2158,7 @@
 
     const WELCOME_HTML = $("thread").innerHTML;
     loadChats();
+    createHeaderExportMenu();
     renderThread();
     renderChatList();
     renderModeToggle();
