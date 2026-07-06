@@ -38,10 +38,15 @@ SEARCH_MAX = 100
 DEEP_DOWNLOADS = 3
 DEEP_MAX_ITERS = 3
 FAST_METADATA_CANDIDATES = 12
-MAX_LLM_ROWS = 300
+AGENT_PREVIEW_ROWS = 10
+MAX_AGENT_STEPS = 10
+MAX_AGENT_ROWS_PER_STEP = 1000
+MAX_AGENT_ROWS_TOTAL = 3500
+MAX_AGENT_DOWNLOADS = 6
+MAX_LLM_ROWS = AGENT_PREVIEW_ROWS
 MAX_PAGES = 8
 PAGE_SIZE = 1000
-MAX_DRILL_ITERS = 3
+MAX_DRILL_ITERS = MAX_AGENT_STEPS
 DRILL_ROWS = 500
 PROFILE_VALUES_CAP = 40
 
@@ -299,8 +304,8 @@ def rows_note(c):
 
 def download_for_llm(pick, question, row_cap):
     cols, rows, trunc = fetch_rows(pick["id"])
-    used = select_relevant(rows, question, row_cap)
-    return {"id": pick["id"], "name": pick["name"], "columns": cols, "rows": rows, "used": used, "csv": to_csv(cols, used), "truncated": trunc}
+    used = rows[:AGENT_PREVIEW_ROWS]
+    return {"id": pick["id"], "name": pick["name"], "columns": cols, "rows": rows, "used": used, "csv": to_csv(cols, used), "truncated": trunc, "_sent": {id(r) for r in used}}
 
 
 def metadata_messages(question, candidates):
@@ -332,41 +337,168 @@ def dataset_profile_text(c):
     return f"Total rows available: {len(c['rows'])}{'+' if c['truncated'] else ''}\nFilterable dimensions (distinct values):\n" + "\n".join(lines)
 
 
-def drill_rows(c, req):
-    sent = c.setdefault("_sent", list(c["used"]))
-    sent_ids = {id(r) for r in sent}
-    pool = c["rows"]
-    where = req.get("where") if isinstance(req.get("where"), dict) else None
-    if where:
-        entries = [(k, v) for k, v in where.items() if k in c["columns"]]
-        if entries:
-            pool = [r for r in c["rows"] if all(str(v).lower() in str(cell_value(r.get(k)) if r.get(k) is not None else "").lower() for k, v in entries)]
-    unseen = [r for r in pool if id(r) not in sent_ids]
-    chosen = (unseen if unseen else pool)[:DRILL_ROWS]
-    sent.extend(chosen)
+def clamp_int(v, lo, hi, default):
+    try:
+        n = int(float(v))
+    except Exception:
+        return default
+    return max(lo, min(hi, n))
+
+
+def dataset_by_id(dataset_id):
+    return next((it for it in INDEX["items"] if str(it["id"]) == str(dataset_id)), None)
+
+
+def match_where(row, columns, where):
+    if not isinstance(where, dict):
+        return True
+    entries = [(k, v) for k, v in where.items() if k in columns]
+    if not entries:
+        return True
+    for k, v in entries:
+        cell = str(cell_value(row.get(k)) if row.get(k) is not None else "").lower()
+        wanted = v if isinstance(v, list) else [v]
+        if not any(str(x).lower() in cell for x in wanted):
+            return False
+    return True
+
+
+def match_query(row, columns, query, scoped_columns=None):
+    terms = tokenize(query)
+    if not terms:
+        return True
+    cols = [c for c in (scoped_columns or columns) if c in columns] or columns
+    blob = " ".join(str(cell_value(row.get(c))) for c in cols).lower()
+    return all(t in blob for t in terms)
+
+
+def filter_rows_for_action(c, action):
+    rows = [r for r in c["rows"] if match_where(r, c["columns"], action.get("where"))]
+    return [r for r in rows if match_query(r, c["columns"], action.get("query") or action.get("search"), action.get("columns"))]
+
+
+def choose_rows(c, action, state):
+    sent = c.setdefault("_sent", {id(r) for r in c["used"]})
+    requested = clamp_int(action.get("limit") or action.get("n"), 1, MAX_AGENT_ROWS_PER_STEP, DRILL_ROWS)
+    remaining = max(0, MAX_AGENT_ROWS_TOTAL - state["rows_returned"])
+    limit = min(requested, remaining)
+    if not limit:
+        return []
+    pool = c["rows"] if action.get("tool") == "preview_more" and not action.get("where") and not (action.get("query") or action.get("search")) else filter_rows_for_action(c, action)
+    offset = clamp_int(action.get("offset"), 0, max(0, len(pool) - 1), 0)
+    sliced = pool[offset:]
+    unseen = [r for r in sliced if id(r) not in sent]
+    chosen = (unseen or sliced)[:limit]
+    sent.update(id(r) for r in chosen)
+    state["rows_returned"] += len(chosen)
     return chosen
 
 
-def parse_fetch_request(text):
+def profile_column(c, column):
+    if column not in c["columns"]:
+        return f"Column not found: {column}"
+    vals, seen = [], set()
+    for r in c["rows"]:
+        v = str(cell_value(r.get(column)) if r.get(column) is not None else "").strip()
+        if v and v not in seen:
+            seen.add(v)
+            vals.append(v)
+    shown = vals[:200]
+    return json.dumps({"dataset": c["id"], "column": column, "distinct_count": len(vals), "values": shown, "truncated": len(vals) > len(shown)}, indent=2, ensure_ascii=False)
+
+
+def numeric_value(v):
+    try:
+        s = str(cell_value(v) if v is not None else "").replace(",", "")
+        n = float(s)
+        return n
+    except Exception:
+        return None
+
+
+def infer_numeric_columns(c, rows):
+    out = []
+    for col in c["columns"]:
+        if any(numeric_value(r.get(col)) is not None for r in rows):
+            out.append(col)
+        if len(out) >= 4:
+            break
+    return out
+
+
+def compute_aggregate(c, action):
+    rows = filter_rows_for_action(c, action)
+    group_by = [str(x) for x in (action.get("group_by") or action.get("groupBy") or []) if str(x) in c["columns"]][:3]
+    metrics = action.get("metrics") if isinstance(action.get("metrics"), list) else []
+    if not metrics:
+        metrics = [{"column": col, "op": "avg"} for col in infer_numeric_columns(c, rows)]
+    cleaned = []
+    for m in metrics[:8]:
+        col = str(m.get("column", ""))
+        op = str(m.get("op", "avg")).lower()
+        if op == "count" or col in c["columns"]:
+            cleaned.append({"column": col, "op": op})
+    groups = {}
+    for row in rows:
+        key = tuple(str(cell_value(row.get(col)) if row.get(col) is not None else "") for col in group_by) if group_by else ("__all__",)
+        groups.setdefault(key, []).append(row)
+    out = []
+    for key, group_rows in groups.items():
+        rec = {}
+        if group_by:
+            for col, val in zip(group_by, key):
+                rec[col] = val
+        rec["row_count"] = len(group_rows)
+        for m in cleaned:
+            if m["op"] == "count":
+                rec[f"count{('_' + m['column']) if m['column'] else ''}"] = len(group_rows)
+                continue
+            nums = [numeric_value(r.get(m["column"])) for r in group_rows]
+            nums = [n for n in nums if n is not None]
+            if not nums:
+                rec[f"{m['op']}_{m['column']}"] = None
+            elif m["op"] == "sum":
+                rec[f"sum_{m['column']}"] = sum(nums)
+            elif m["op"] == "min":
+                rec[f"min_{m['column']}"] = min(nums)
+            elif m["op"] == "max":
+                rec[f"max_{m['column']}"] = max(nums)
+            else:
+                rec[f"avg_{m['column']}"] = sum(nums) / len(nums)
+        out.append(rec)
+    limit = clamp_int(action.get("limit"), 1, 200, 80)
+    return json.dumps({"dataset": c["id"], "matched_rows": len(rows), "grouped_by": group_by, "results": out[:limit], "truncated": len(out) > limit}, indent=2, ensure_ascii=False)
+
+
+def parse_agent_action(text):
     try:
         o = extract_json(text)
         if isinstance(o, dict) and isinstance(o.get("fetch_rows"), dict):
-            return o["fetch_rows"]
+            return {"tool": "filter_rows", **o["fetch_rows"]}
+        if isinstance(o, dict) and (o.get("tool") or o.get("action")):
+            o["tool"] = str(o.get("tool") or o.get("action"))
+            return o
     except Exception:
         pass
     return None
 
 
-def data_initial_messages(question, collected, deep, any_hidden):
+def data_initial_messages(question, collected, deep):
     sys = P("data_sys_multi") if deep else P("data_sys_single")
     blocks = []
     for c in collected:
         hidden = len(c["used"]) < len(c["rows"])
         profile = ("\n" + dataset_profile_text(c)) if hidden else ""
-        label = f"Sample rows ({len(c['used'])} most-relevant of {len(c['rows'])}{'+' if c['truncated'] else ''}, CSV):" if hidden else "All rows (CSV):"
+        label = f"Preview rows ({len(c['used'])} of {len(c['rows'])}{'+' if c['truncated'] else ''}, CSV):" if hidden else "All rows (CSV):"
         blocks.append(f"Dataset {c['id']} — {c['name']}\nColumns: {', '.join(c['columns'])}\n{rows_note(c)}{profile}\n\n{label}\n{c['csv']}")
     body = ("\n\n" + "=" * 40 + "\n\n").join(blocks)
-    protocol = P("drill_protocol", max_drill_iters=MAX_DRILL_ITERS) if any_hidden else ""
+    protocol = P(
+        "agentic_data_protocol",
+        max_agent_steps=MAX_AGENT_STEPS,
+        max_rows_per_step=MAX_AGENT_ROWS_PER_STEP,
+        max_rows_total=MAX_AGENT_ROWS_TOTAL,
+        max_agent_downloads=MAX_AGENT_DOWNLOADS,
+    )
     lead = f"You have {len(collected)} NDAP datasets below — use them together as needed:\n\n" if len(collected) > 1 else ""
     return [
         {"role": "system", "content": sys},
@@ -374,37 +506,77 @@ def data_initial_messages(question, collected, deep, any_hidden):
     ]
 
 
+def execute_agent_action(action, collected, state):
+    tool = str(action.get("tool") or action.get("action") or "").lower()
+    if tool == "search_datasets":
+        query = str(action.get("query") or action.get("q") or "").strip()
+        limit = clamp_int(action.get("limit"), 1, 50, 12)
+        matches = search_index(query, min(SEARCH_MAX, limit)) if query else []
+        return {"tool": tool, "query": query, "rows": 0, "observation": f"Observation: search_datasets returned {len(matches)} candidates:\n{json.dumps(slim(matches), indent=2, ensure_ascii=False)}"}
+    if tool == "inspect_dataset":
+        item = dataset_by_id(action.get("dataset") or action.get("dataset_id"))
+        return {"tool": tool, "rows": 0, "observation": f"Observation: inspect_dataset:\n{json.dumps(item, indent=2, ensure_ascii=False) if item else 'dataset not found'}"}
+    if tool == "download_dataset":
+        did = action.get("dataset") or action.get("dataset_id")
+        existing = next((c for c in collected if str(c["id"]) == str(did)), None)
+        if existing:
+            return {"tool": tool, "dataset": did, "rows": 0, "observation": f"Observation: dataset {did} is already downloaded.\n{dataset_profile_text(existing)}"}
+        if state["downloads"] >= MAX_AGENT_DOWNLOADS:
+            return {"tool": tool, "dataset": did, "rows": 0, "observation": f"Observation: download budget exhausted ({MAX_AGENT_DOWNLOADS} datasets)."}
+        item = dataset_by_id(did)
+        if not item:
+            return {"tool": tool, "dataset": did, "rows": 0, "observation": f"Observation: dataset not found: {did}"}
+        got = download_for_llm(item, "", AGENT_PREVIEW_ROWS)
+        collected.append(got)
+        state["downloads"] += 1
+        state["rows_returned"] += len(got["used"])
+        return {"tool": tool, "dataset": did, "rows": len(got["used"]), "observation": f"Observation: downloaded dataset {got['id']} — {got['name']}\nColumns: {', '.join(got['columns'])}\n{rows_note(got)}\n{dataset_profile_text(got)}\n\nPreview rows ({len(got['used'])}, CSV):\n{got['csv']}"}
+
+    ds = next((c for c in collected if str(c["id"]) == str(action.get("dataset") or action.get("dataset_id"))), None)
+    if not ds:
+        return {"tool": tool, "rows": 0, "observation": f"Observation: {tool} requires a downloaded dataset; request download_dataset first."}
+    if tool == "profile_column":
+        return {"tool": tool, "dataset": ds["id"], "rows": 0, "observation": "Observation: profile_column:\n" + profile_column(ds, str(action.get("column") or ""))}
+    if tool == "compute_aggregate":
+        return {"tool": tool, "dataset": ds["id"], "rows": 0, "observation": "Observation: compute_aggregate:\n" + compute_aggregate(ds, action)}
+    if tool in {"preview_more", "filter_rows", "search_rows", "fetch_rows"}:
+        rows = choose_rows(ds, action, state)
+        csv = to_csv(ds["columns"], rows) if rows else "(no rows matched)"
+        where = f" where {json.dumps(action.get('where'), ensure_ascii=False)}" if isinstance(action.get("where"), dict) else ""
+        q = f" query={action.get('query') or action.get('search')}" if (action.get("query") or action.get("search")) else ""
+        return {"tool": tool, "dataset": ds["id"], "rows": len(rows), "where": action.get("where"), "query": action.get("query") or action.get("search"), "observation": f"Observation: {tool} returned {len(rows)} rows from dataset {ds['id']}{where}{q}:\n{csv}"}
+    return {"tool": tool, "rows": 0, "observation": f'Observation: unknown tool "{tool}".'}
+
+
 def synthesize_with_drilldown(model, question, collected):
-    any_hidden = any(len(c["used"]) < len(c["rows"]) for c in collected)
-    messages = data_initial_messages(question, collected, deep=len(collected) > 1, any_hidden=any_hidden)
+    messages = data_initial_messages(question, collected, deep=len(collected) > 1)
     drills = []
-    if any_hidden:
-        ask = P("drill_ask")
-        for _ in range(MAX_DRILL_ITERS):
-            messages.append({"role": "user", "content": ask})
-            resp = chat(model, messages, 0, 450)
-            req = parse_fetch_request(resp)
-            if not req:
-                messages.pop()
-                break
-            messages.append({"role": "assistant", "content": resp})
-            ds = next((c for c in collected if str(c["id"]) == str(req.get("dataset"))), collected[0])
-            got = drill_rows(ds, req)
-            drills.append({"dataset": ds["id"], "where": req.get("where"), "more": req.get("more"), "rows": len(got), "reason": req.get("reason")})
-            csv = to_csv(ds["columns"], got) if got else "(no rows matched that filter)"
-            messages.append({"role": "user", "content": f"Rows for dataset {ds['id']} ({len(got)}):\n{csv}"})
+    state = {"downloads": len(collected), "rows_returned": sum(len(c["used"]) for c in collected)}
+    ask = P("agentic_data_ask") or P("drill_ask")
+    for _ in range(MAX_AGENT_STEPS):
+        messages.append({"role": "user", "content": ask})
+        resp = chat(model, messages, 0, 700)
+        action = parse_agent_action(resp)
+        if not action or str(action.get("tool", "")).lower() in {"ready", "answer", "final_answer"}:
+            messages.pop()
+            break
+        messages.append({"role": "assistant", "content": resp})
+        obs = execute_agent_action(action, collected, state)
+        drills.append({k: v for k, v in obs.items() if k != "observation"})
+        messages.append({"role": "user", "content": obs["observation"]})
     answer_ask = P("answer_ask")
     messages.append({"role": "user", "content": answer_ask})
     final = chat(model, messages, 0, 3000)
-    stray = parse_fetch_request(final) if any_hidden else None
-    if stray:
-        ds = next((c for c in collected if str(c["id"]) == str(stray.get("dataset"))), collected[0])
-        got = drill_rows(ds, stray)
-        drills.append({"dataset": ds["id"], "where": stray.get("where"), "more": stray.get("more"), "rows": len(got), "reason": stray.get("reason"), "phase": "final"})
-        csv = to_csv(ds["columns"], got) if got else "(no rows matched that filter)"
+    stray = parse_agent_action(final)
+    for _ in range(3):
+        if not stray:
+            break
+        obs = execute_agent_action(stray, collected, state)
+        drills.append({k: v for k, v in obs.items() if k != "observation"} | {"phase": "final"})
         messages.append({"role": "assistant", "content": final})
-        messages.append({"role": "user", "content": f"Rows for dataset {ds['id']} ({len(got)}):\n{csv}\n\n{answer_ask}"})
+        messages.append({"role": "user", "content": f"{obs['observation']}\n\n{answer_ask}"})
         final = chat(model, messages, 0, 3000)
+        stray = parse_agent_action(final)
     return final, drills
 
 

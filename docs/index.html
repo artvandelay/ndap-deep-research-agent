@@ -656,9 +656,13 @@
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
-    const MAX_LLM_ROWS = 300;     // most-relevant rows handed to the model as the initial sample
-    const MAX_DRILL_ITERS = 3;    // model-driven "read more rows" rounds during synthesis
-    const DRILL_ROWS = 500;       // rows returned per model row-request
+    const AGENT_PREVIEW_ROWS = 10; // tiny seed sample; the model requests more if needed
+    const MAX_AGENT_STEPS = 10;    // bounded browser-local tool loop before final answer
+    const MAX_AGENT_ROWS_PER_STEP = 1000;
+    const MAX_AGENT_ROWS_TOTAL = 3500;
+    const MAX_AGENT_DOWNLOADS = 6;
+    const MAX_DRILL_ITERS = MAX_AGENT_STEPS; // kept for prompt/test compatibility
+    const DRILL_ROWS = 500;       // legacy default row-request size
     const PROFILE_VALUES_CAP = 40; // distinct dimension values listed in the data profile
     const MAX_TURNS = 3;          // compressed prior turns kept as context
     const MAX_ANSWER_CHARS = 700; // per-turn answer length kept in memory
@@ -1297,21 +1301,33 @@
         "X-Title": "NDAP Deep Research Agent",
       };
     }
+    async function fetchWithTimeout(url, options = {}, ms = 180000) {
+      const ctrl = new AbortController();
+      const timer = setTimeout(() => ctrl.abort(), ms);
+      try {
+        return await fetch(url, { ...options, signal: ctrl.signal });
+      } catch (err) {
+        if (err && err.name === "AbortError") throw new Error(`Request timed out after ${Math.round(ms / 1000)}s`);
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
     async function orComplete(messages, temperature = 0.2, maxTokens = 1024) {
-      const res = await fetch(OPENROUTER_URL, {
+      const res = await fetchWithTimeout(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
         body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
-      });
+      }, 180000);
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const data = await res.json();
       accumulateUsage(data.usage);
       return data.choices?.[0]?.message?.content || "";
     }
     async function orStream(messages, temperature, onDelta, maxTokens = 1800) {
-      const res = await fetch(OPENROUTER_URL, {
+      const res = await fetchWithTimeout(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
         body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, stream: true, usage: { include: true } }),
-      });
+      }, 240000);
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const reader = res.body.getReader();
       const decoder = new TextDecoder();
@@ -1626,7 +1642,7 @@
       const rows = [];
       let truncated = false;
       for (let page = 1; page <= MAX_PAGES; page++) {
-        const res = await fetch(proxied(buildNdapUrl(recipe, page)));
+        const res = await fetchWithTimeout(proxied(buildNdapUrl(recipe, page)), {}, 90000);
         if (!res.ok) throw new Error(`proxy/NDAP ${res.status}: ${(await res.text()).slice(0, 160)}`);
         const payload = await res.json();
         if (payload.IsError) throw new Error(`NDAP error: ${payload.Message || "unknown"}`);
@@ -1707,28 +1723,141 @@
       return `Total rows available: ${c.rows.length}${c.truncated ? "+" : ""}\nFilterable dimensions (distinct values):\n${lines.join("\n")}`;
     }
 
-    // Resolve a model row-request against the dataset's in-memory rows (no new network call).
-    function drillRows(c, req) {
+    function clampInt(v, lo, hi, fallback) {
+      const n = Number(v);
+      if (!Number.isFinite(n)) return fallback;
+      return Math.max(lo, Math.min(hi, Math.floor(n)));
+    }
+
+    function datasetById(id) {
+      return (ndapIndex?.items || []).find((x) => String(x.id) === String(id)) || null;
+    }
+
+    function matchWhere(row, columns, where) {
+      if (!where || typeof where !== "object") return true;
+      const entries = Object.entries(where).filter(([k]) => columns.includes(k));
+      if (!entries.length) return true;
+      return entries.every(([k, val]) => {
+        const cell = String(cellValue(row[k]) ?? "").toLowerCase();
+        const wanted = Array.isArray(val) ? val : [val];
+        return wanted.some((v) => cell.includes(String(v).toLowerCase()));
+      });
+    }
+
+    function matchQuery(row, columns, query, scopedColumns) {
+      const terms = tokenize(query);
+      if (!terms.length) return true;
+      const cols = Array.isArray(scopedColumns) && scopedColumns.length
+        ? scopedColumns.filter((c) => columns.includes(c))
+        : columns;
+      const blob = cols.map((c) => cellValue(row[c])).join(" ").toLowerCase();
+      return terms.every((t) => blob.includes(t));
+    }
+
+    function filterRowsForAction(c, action) {
+      let rows = c.rows.filter((r) => matchWhere(r, c.columns, action.where));
+      rows = rows.filter((r) => matchQuery(r, c.columns, action.query || action.search, action.columns));
+      return rows;
+    }
+
+    function chooseRows(c, action, state) {
       c._sent = c._sent || new Set(c.used);
-      let pool = c.rows;
-      if (req.where && typeof req.where === "object") {
-        const entries = Object.entries(req.where).filter(([k]) => c.columns.includes(k));
-        if (entries.length) {
-          pool = c.rows.filter((r) => entries.every(([k, val]) =>
-            String(cellValue(r[k]) ?? "").toLowerCase().includes(String(val).toLowerCase())));
-        }
+      const requested = clampInt(action.limit || action.n, 1, MAX_AGENT_ROWS_PER_STEP, DRILL_ROWS);
+      const remaining = Math.max(0, MAX_AGENT_ROWS_TOTAL - state.rowsReturned);
+      const limit = Math.min(requested, remaining);
+      if (!limit) return [];
+
+      let pool = filterRowsForAction(c, action);
+      if ((action.tool || action.action) === "preview_more" && !action.where && !action.query && !action.search) {
+        pool = c.rows;
       }
-      const unseen = pool.filter((r) => !c._sent.has(r));
-      const chosen = (unseen.length ? unseen : pool).slice(0, DRILL_ROWS);
+      const offset = clampInt(action.offset, 0, Math.max(0, pool.length - 1), 0);
+      const sliced = pool.slice(offset);
+      const unseen = sliced.filter((r) => !c._sent.has(r));
+      const chosen = (unseen.length ? unseen : sliced).slice(0, limit);
       for (const r of chosen) c._sent.add(r);
+      state.rowsReturned += chosen.length;
       return chosen;
     }
 
-    function parseFetchRequest(text) {
+    function profileColumn(c, column) {
+      if (!c.columns.includes(column)) return `Column not found: ${column}`;
+      const vals = [];
+      const seen = new Set();
+      for (const r of c.rows) {
+        const v = String(cellValue(r[column]) ?? "").trim();
+        if (v && !seen.has(v)) { seen.add(v); vals.push(v); }
+      }
+      const shown = vals.slice(0, 200);
+      return JSON.stringify({ dataset: c.id, column, distinct_count: vals.length, values: shown, truncated: vals.length > shown.length }, null, 2);
+    }
+
+    function numericValue(v) {
+      const n = Number(String(cellValue(v) ?? "").replace(/,/g, ""));
+      return Number.isFinite(n) ? n : null;
+    }
+
+    function inferNumericColumns(c, rows) {
+      return c.columns.filter((col) => rows.some((r) => numericValue(r[col]) != null)).slice(0, 4);
+    }
+
+    function computeAggregate(c, action) {
+      const rows = filterRowsForAction(c, action);
+      const groupBy = []
+        .concat(action.group_by || action.groupBy || [])
+        .map(String)
+        .filter((col) => c.columns.includes(col))
+        .slice(0, 3);
+      let metrics = Array.isArray(action.metrics) ? action.metrics : [];
+      if (!metrics.length) {
+        metrics = inferNumericColumns(c, rows).map((column) => ({ column, op: "avg" }));
+      }
+      metrics = metrics
+        .map((m) => ({ column: String(m.column || ""), op: String(m.op || "avg").toLowerCase() }))
+        .filter((m) => m.op === "count" || c.columns.includes(m.column))
+        .slice(0, 8);
+
+      const groups = new Map();
+      for (const row of rows) {
+        const key = groupBy.length ? groupBy.map((col) => String(cellValue(row[col]) ?? "")).join(" | ") : "__all__";
+        if (!groups.has(key)) groups.set(key, []);
+        groups.get(key).push(row);
+      }
+      const out = [];
+      for (const [key, groupRows] of groups) {
+        const rec = {};
+        if (groupBy.length) {
+          const parts = key.split(" | ");
+          groupBy.forEach((col, i) => { rec[col] = parts[i] || ""; });
+        }
+        rec.row_count = groupRows.length;
+        for (const m of metrics) {
+          if (m.op === "count") {
+            rec[`count${m.column ? "_" + m.column : ""}`] = groupRows.length;
+            continue;
+          }
+          const nums = groupRows.map((r) => numericValue(r[m.column])).filter((n) => n != null);
+          if (!nums.length) { rec[`${m.op}_${m.column}`] = null; continue; }
+          if (m.op === "sum") rec[`sum_${m.column}`] = nums.reduce((a, b) => a + b, 0);
+          else if (m.op === "min") rec[`min_${m.column}`] = Math.min(...nums);
+          else if (m.op === "max") rec[`max_${m.column}`] = Math.max(...nums);
+          else rec[`avg_${m.column}`] = nums.reduce((a, b) => a + b, 0) / nums.length;
+        }
+        out.push(rec);
+      }
+      const limit = clampInt(action.limit, 1, 200, 80);
+      return JSON.stringify({ dataset: c.id, matched_rows: rows.length, grouped_by: groupBy, results: out.slice(0, limit), truncated: out.length > limit }, null, 2);
+    }
+
+    function parseAgentAction(text) {
+      const raw = String(text || "").trim();
+      if (!raw || /^READY$/i.test(raw)) return null;
       try {
-        const o = extractJson(text);
-        if (o && o.fetch_rows && typeof o.fetch_rows === "object") return o.fetch_rows;
-      } catch (_) { /* not a fetch request */ }
+        const o = extractJson(raw);
+        if (o.fetch_rows && typeof o.fetch_rows === "object") return { tool: "filter_rows", ...o.fetch_rows };
+        const action = o.tool || o.action;
+        if (action) return { ...o, tool: String(action) };
+      } catch (_) { /* not a tool request */ }
       return null;
     }
 
@@ -1936,17 +2065,22 @@
       ];
     }
 
-    // Initial synthesis messages. When a dataset is larger than its sample, include a data
-    // profile + the row-request protocol so the model can pull the exact rows it needs.
-    function dataInitialMessages(question, collected, histPreamble, deep, anyHidden) {
+    // Initial synthesis messages. Real-numbers mode starts with tiny previews; the
+    // model can request more browser-local tool actions before the final answer.
+    function dataInitialMessages(question, collected, histPreamble, deep) {
       const sys = deep ? P("data_sys_multi") : P("data_sys_single");
       const blocks = collected.map((c) => {
         const hidden = c.used.length < c.rows.length;
         const profile = hidden ? `\n${profileText(c)}` : "";
-        const sampleLabel = hidden ? `Sample rows (${c.used.length} most-relevant of ${c.rows.length}${c.truncated ? "+" : ""}, CSV):` : "All rows (CSV):";
+        const sampleLabel = hidden ? `Preview rows (${c.used.length} of ${c.rows.length}${c.truncated ? "+" : ""}, CSV):` : "All rows (CSV):";
         return `Dataset ${c.id} — ${c.name}\nColumns: ${c.columns.join(", ")}\n${rowsNote(c)}${profile}\n\n${sampleLabel}\n${c.csv}`;
       }).join("\n\n========================================\n\n");
-      const protocol = anyHidden ? P("drill_protocol", { max_drill_iters: MAX_DRILL_ITERS }) : "";
+      const protocol = P("agentic_data_protocol", {
+        max_agent_steps: MAX_AGENT_STEPS,
+        max_rows_per_step: MAX_AGENT_ROWS_PER_STEP,
+        max_rows_total: MAX_AGENT_ROWS_TOTAL,
+        max_agent_downloads: MAX_AGENT_DOWNLOADS,
+      }) || P("drill_protocol", { max_drill_iters: MAX_DRILL_ITERS });
       const lead = collected.length > 1 ? `You have ${collected.length} NDAP datasets below — use them together as needed:\n\n` : "";
       return [
         { role: "system", content: sys },
@@ -1954,28 +2088,100 @@
       ];
     }
 
-    // Synthesis with a bounded, model-driven "read more rows" loop. All rows are already in
-    // memory, so each expansion is an in-memory re-slice — no extra network calls.
-    async function synthesizeWithDrilldown(question, collected, history, ui, deep, onDelta, maxOut) {
-      const anyHidden = collected.some((c) => c.used.length < c.rows.length);
-      const messages = dataInitialMessages(question, collected, convoBlock(history), deep, anyHidden);
+    async function executeAgentAction(action, collected, state, ui) {
+      const tool = String(action.tool || action.action || "").toLowerCase();
+      const reason = action.reason ? `reason: ${action.reason}` : "";
 
-      if (anyHidden) {
-        const ask = P("drill_ask");
-        for (let i = 1; i <= MAX_DRILL_ITERS; i++) {
-          messages.push({ role: "user", content: ask });
-          const resp = await orComplete(messages, 0, 450);
-          const req = parseFetchRequest(resp);
-          if (!req) { messages.pop(); break; }  // READY (or a non-request) → drop the ask, proceed
-          messages.push({ role: "assistant", content: resp });
-          const ds = collected.find((c) => String(c.id) === String(req.dataset)) || collected[0];
-          const got = drillRows(ds, req);
-          const where = req.where && Object.keys(req.where).length ? ` where ${JSON.stringify(req.where)}` : " (next batch)";
-          liveStep(ui, "expand_rows", `dataset ${ds.id}: +${got.length} row${got.length === 1 ? "" : "s"}${where}`,
-            { payload: req.reason ? `reason: ${req.reason}` : "" });
-          const csv = got.length ? rowsToCsv(ds.columns, got) : "(no rows matched that filter)";
-          messages.push({ role: "user", content: `Rows for dataset ${ds.id} (${got.length}):\n${csv}` });
+      if (tool === "search_datasets") {
+        const query = String(action.query || action.q || "").trim();
+        const limit = clampInt(action.limit, 1, 50, 12);
+        if (!query) return "Observation: search_datasets requires a query.";
+        const matches = searchIndex(query, Math.min(settings.searchMax, limit));
+        renderSources(ui, matches);
+        liveStep(ui, "agent_search", `q="${query}" → ${matches.length} datasets`, { payload: reason });
+        return `Observation: search_datasets returned ${matches.length} candidates:\n${JSON.stringify(slimCandidates(matches), null, 2)}`;
+      }
+
+      if (tool === "inspect_dataset") {
+        const item = datasetById(action.dataset || action.dataset_id);
+        if (!item) return `Observation: dataset not found: ${action.dataset || action.dataset_id}`;
+        renderSources(ui, [item]);
+        liveStep(ui, "agent_inspect", `dataset ${item.id} — ${item.name}`, { payload: reason });
+        return `Observation: inspect_dataset:\n${JSON.stringify(item, null, 2)}`;
+      }
+
+      if (tool === "download_dataset") {
+        const id = action.dataset || action.dataset_id;
+        const existing = collected.find((c) => String(c.id) === String(id));
+        if (existing) return `Observation: dataset ${id} is already downloaded. Columns: ${existing.columns.join(", ")}\n${profileText(existing)}`;
+        if (state.downloads >= MAX_AGENT_DOWNLOADS) return `Observation: download budget exhausted (${MAX_AGENT_DOWNLOADS} datasets).`;
+        const item = datasetById(id);
+        if (!item) return `Observation: dataset not found: ${id}`;
+        const s = liveStep(ui, "agent_download", `pulling rows for ${item.id}…`, { state: "run", payload: reason });
+        try {
+          const { columns, rows, truncated } = await fetchDatasetRows(item.id, (n, p) => s.detail(`dataset ${item.id}: ${n} rows (page ${p})…`));
+          const used = rows.slice(0, AGENT_PREVIEW_ROWS);
+          const got = { id: item.id, name: item.name, columns, rows, used, csv: rowsToCsv(columns, used), truncated };
+          got._sent = new Set(used);
+          collected.push(got);
+          state.downloads += 1;
+          state.rowsReturned += used.length;
+          s.done(`dataset ${item.id}: ${rows.length} rows${truncated ? "+ (capped)" : ""}, previewed ${used.length}`);
+          return `Observation: downloaded dataset ${item.id} — ${item.name}\nColumns: ${columns.join(", ")}\n${rowsNote(got)}\n${profileText(got)}\n\nPreview rows (${used.length}, CSV):\n${got.csv}`;
+        } catch (err) {
+          s.done(`dataset ${item.id}: fetch failed`, String(err.message));
+          return `Observation: download_dataset failed for ${item.id}: ${err.message}`;
         }
+      }
+
+      const ds = collected.find((c) => String(c.id) === String(action.dataset || action.dataset_id));
+      if (!ds) return `Observation: ${tool} requires a downloaded dataset; request download_dataset first.`;
+
+      if (tool === "profile_column") {
+        const column = String(action.column || "");
+        liveStep(ui, "agent_profile", `dataset ${ds.id}: ${column || "(missing column)"}`, { payload: reason });
+        return `Observation: profile_column:\n${profileColumn(ds, column)}`;
+      }
+
+      if (tool === "compute_aggregate") {
+        const result = computeAggregate(ds, action);
+        liveStep(ui, "agent_compute", `dataset ${ds.id}: aggregate`, { payload: `${reason}\n${result.slice(0, 500)}`.trim() });
+        return `Observation: compute_aggregate:\n${result}`;
+      }
+
+      if (["preview_more", "filter_rows", "search_rows", "fetch_rows"].includes(tool)) {
+        const rows = chooseRows(ds, action, state);
+        const where = action.where && Object.keys(action.where).length ? ` where ${JSON.stringify(action.where)}` : "";
+        const q = action.query || action.search ? ` query="${action.query || action.search}"` : "";
+        liveStep(ui, `agent_${tool}`, `dataset ${ds.id}: ${rows.length} rows${where}${q}`, { payload: reason });
+        return `Observation: ${tool} returned ${rows.length} rows from dataset ${ds.id}${where}${q}:\n${rows.length ? rowsToCsv(ds.columns, rows) : "(no rows matched)"}`;
+      }
+
+      return `Observation: unknown tool "${tool}". Use search_datasets, inspect_dataset, download_dataset, preview_more, filter_rows, search_rows, profile_column, compute_aggregate, or answer.`;
+    }
+
+    // Synthesis with a bounded browser-local agent loop. The model chooses tool
+    // actions; the page validates, executes, and feeds observations back.
+    async function synthesizeWithDrilldown(question, collected, history, ui, deep, onDelta, maxOut) {
+      const messages = dataInitialMessages(question, collected, convoBlock(history), deep);
+      const state = {
+        downloads: collected.length,
+        rowsReturned: collected.reduce((n, c) => n + c.used.length, 0),
+      };
+      for (const c of collected) c._sent = c._sent || new Set(c.used);
+
+      const ask = P("agentic_data_ask") || P("drill_ask");
+      for (let i = 1; i <= MAX_AGENT_STEPS; i++) {
+        messages.push({ role: "user", content: ask });
+        const resp = await orComplete(messages, 0, 700);
+        const action = parseAgentAction(resp);
+        if (!action || ["ready", "answer", "final_answer"].includes(String(action.tool).toLowerCase())) {
+          messages.pop();
+          break;
+        }
+        messages.push({ role: "assistant", content: resp });
+        const observation = await executeAgentAction(action, collected, state, ui);
+        messages.push({ role: "user", content: observation });
       }
 
       const ANSWER_ASK = P("answer_ask");
@@ -1986,17 +2192,14 @@
       messages.push({ role: "user", content: ANSWER_ASK });
       let finalText = await answer();
 
-      // Safety net: models occasionally emit a fetch request instead of answering.
-      // Honor it once (drill + re-answer) rather than showing raw JSON to the user.
-      const stray = anyHidden ? parseFetchRequest(finalText) : null;
-      if (stray) {
-        const ds = collected.find((c) => String(c.id) === String(stray.dataset)) || collected[0];
-        const got = drillRows(ds, stray);
-        liveStep(ui, "expand_rows", `dataset ${ds.id}: +${got.length} row${got.length === 1 ? "" : "s"} (final)`,
-          { payload: stray.reason || "" });
+      // Safety net: models occasionally emit a tool request instead of answering.
+      // Honor it once and ask again rather than showing raw JSON to the user.
+      let stray = parseAgentAction(finalText);
+      for (let i = 0; stray && i < 3; i++) {
         messages.push({ role: "assistant", content: finalText });
-        messages.push({ role: "user", content: `Rows for dataset ${ds.id} (${got.length}):\n${got.length ? rowsToCsv(ds.columns, got) : "(no rows matched that filter)"}\n\n${ANSWER_ASK}` });
+        messages.push({ role: "user", content: `${await executeAgentAction(stray, collected, state, ui)}\n\n${ANSWER_ASK}` });
         finalText = await answer();
+        stray = parseAgentAction(finalText);
       }
       return finalText;
     }
@@ -2015,17 +2218,20 @@
     }
 
     /* ---------- Orchestration ---------- */
-    // Download one dataset's rows and shape an LLM-sized CSV, with a live trace step.
-    async function downloadForLLM(pick, question, ui, rowCap) {
+    // Download one dataset's rows and send only a tiny preview; the model can ask
+    // for more rows/tools during synthesis.
+    async function downloadForLLM(pick, question, ui) {
       const s = liveStep(ui, "download_dataset", `pulling rows for ${pick.id} via proxy…`, { state: "run" });
       try {
         const { columns, rows, truncated } = await fetchDatasetRows(pick.id, (n, p) => s.detail(`dataset ${pick.id}: ${n} rows (page ${p})…`));
-        const used = selectRelevantRows(rows, question, rowCap);
+        const used = rows.slice(0, AGENT_PREVIEW_ROWS);
         const csv = rowsToCsv(columns, used);
-        const sentNote = used.length < rows.length ? ` · ${used.length} most-relevant sent` : "";
+        const sentNote = used.length < rows.length ? ` · ${used.length} preview rows sent` : "";
         s.done(`dataset ${pick.id}: ${rows.length} rows${truncated ? "+ (capped)" : ""}, ${columns.length} cols${sentNote}`,
           `columns: ${columns.join(", ")}\n\n${csv.split("\n").slice(0, 9).join("\n")}${used.length > 8 ? "\n…" : ""}`);
-        return { id: pick.id, name: pick.name, columns, rows, used, csv, truncated };
+        const got = { id: pick.id, name: pick.name, columns, rows, used, csv, truncated };
+        got._sent = new Set(used);
+        return got;
       } catch (err) {
         s.done(`dataset ${pick.id}: fetch failed — skipping`, String(err.message));
         return null;
@@ -2050,7 +2256,7 @@
         const { picks, reason } = await selectDatasets(question, candidates, [], 1, history);
         const pick = picks[0] || candidates[0];
         sel.done(`chose ${pick.id} — ${pick.name}`, `reason: ${reason}`);
-        const got = await downloadForLLM(pick, question, ui, MAX_LLM_ROWS);
+        const got = await downloadForLLM(pick, question, ui);
         if (got) return { collected: [got], usedDataset: `${got.id} (${got.name})` };
       }
       return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre), usedDataset: "" };
@@ -2076,9 +2282,6 @@
       if (!settings.proxy) return metaFallback();
 
       const budget = settings.deepDownloads;
-      // Send each chosen dataset up to the full cap (don't split the budget across
-      // datasets) so small/medium datasets arrive COMPLETE and can be aggregated.
-      const rowCap = MAX_LLM_ROWS;
       const collected = [];
       const downloadedIds = [];
 
@@ -2092,7 +2295,7 @@
         for (const pick of picks) {
           if (collected.length >= budget) break;
           downloadedIds.push(String(pick.id));
-          const got = await downloadForLLM(pick, question, ui, rowCap);
+          const got = await downloadForLLM(pick, question, ui);
           if (got) collected.push(got);
         }
         if (collected.length >= budget || iter >= DEEP_MAX_ITERS) break;
