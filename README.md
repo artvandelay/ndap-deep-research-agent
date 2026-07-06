@@ -15,9 +15,10 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each answer runs in one of two modes via a **Fast / Deep** toggle, and shows a visible agent trace. Long runs can be stopped from the composer and have mode-specific wall-clock ceilings. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each chat starts in one locked mode chosen from the **Fast / Deep / Scoop** toggle, and shows a visible agent trace. Long runs can be stopped from the composer and have mode-specific wall-clock ceilings. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
   - **Fast**: a single pass — plan one search → retrieve candidates → pick the single best dataset → (optionally) download it → synthesize.
   - **Deep**: a bounded research loop — decompose the question into several search angles → gather a candidate pool → select and download multiple datasets → reflect on coverage and search again to fill gaps → synthesize across all sources.
+  - **Scoop**: the Fast pipeline with a data-journalist voice — headline, bold lede, the story told through the numbers, plus a labeled "The Take" section for opinions and forecasts derived from the cited rows. Every figure is still NDAP-only.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -112,12 +113,13 @@ https://artvandelay.github.io/ndap-deep-research-agent/
 
 It is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it searches a browser-friendly metadata export generated from `data/index.db` and grounds the answer in the matching records (and, in real-numbers mode, their downloaded rows).
 
-Each answer is **Fast** or **Deep**, chosen with the toggle in the header (top of the chat). You can switch modes between turns in the same conversation; each turn records the mode used:
+Each chat starts in **Fast**, **Deep**, or **Scoop**, chosen with the toggle before the first message. The mode then locks for that conversation, and each turn records the mode used:
 
 - **Fast** — one model-planned search → retrieve candidates → pick the single best dataset → (real-numbers mode) download it → synthesize a grounded answer. Lowest latency and cost.
 - **Deep** — the model decomposes the question into several search angles, gathers a wider candidate pool, then selects and downloads multiple datasets, reflecting between rounds to fill gaps before synthesizing across all of them. Better for questions that need to combine datasets (e.g. rainfall × crop production), at higher latency and cost.
+- **Scoop** — the Fast pipeline with a data-journalist persona: an H3 headline, a bold one-line lede, the story told through real NDAP numbers, then a "The Take" section whose bullets are labeled *Opinion* or *Forecast* and derived from the cited rows, closing with a one-line disclaimer. Same latency profile and 2-minute ceiling as Fast; answers are creative in tone but never in the numbers.
 
-While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast stops after 2 minutes and Deep stops after 5 minutes, with a timeout note instead of hanging indefinitely.
+While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast and Scoop stop after 2 minutes and Deep stops after 5 minutes, with a timeout note instead of hanging indefinitely.
 
 Open Settings (gear icon, top-right) and enter:
 

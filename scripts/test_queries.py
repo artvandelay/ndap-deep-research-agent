@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-NDAP query regression TEST — a headless mirror of the docs/index.html Fast & Deep
+NDAP query regression TEST — a headless mirror of the docs/index.html Fast, Deep & Scoop
 pipelines, used to check answer quality without a browser.
 
 Why this file exists (read before editing):
@@ -308,9 +308,9 @@ def download_for_llm(pick, question, row_cap):
     return {"id": pick["id"], "name": pick["name"], "columns": cols, "rows": rows, "used": used, "csv": to_csv(cols, used), "truncated": trunc, "_sent": {id(r) for r in used}}
 
 
-def metadata_messages(question, candidates):
+def metadata_messages(question, candidates, mode="fast"):
     return [
-        {"role": "system", "content": P("metadata_sys")},
+        {"role": "system", "content": P("scoop_metadata_sys" if mode == "scoop" else "metadata_sys")},
         {"role": "user", "content": f"Current question:\n{question}\n\nRetrieved candidate metadata (JSON):\n{json.dumps(candidates, indent=2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action."},
     ]
 
@@ -483,8 +483,8 @@ def parse_agent_action(text):
     return None
 
 
-def data_initial_messages(question, collected, deep):
-    sys = P("data_sys_multi") if deep else P("data_sys_single")
+def data_initial_messages(question, collected, mode):
+    sys = P("data_sys_multi") if mode == "deep" else (P("scoop_sys_single") if mode == "scoop" else P("data_sys_single"))
     blocks = []
     for c in collected:
         hidden = len(c["used"]) < len(c["rows"])
@@ -548,8 +548,8 @@ def execute_agent_action(action, collected, state):
     return {"tool": tool, "rows": 0, "observation": f'Observation: unknown tool "{tool}".'}
 
 
-def synthesize_with_drilldown(model, question, collected):
-    messages = data_initial_messages(question, collected, deep=len(collected) > 1)
+def synthesize_with_drilldown(model, question, collected, mode):
+    messages = data_initial_messages(question, collected, mode)
     drills = []
     state = {"downloads": len(collected), "rows_returned": sum(len(c["used"]) for c in collected)}
     ask = P("agentic_data_ask") or P("drill_ask")
@@ -564,9 +564,11 @@ def synthesize_with_drilldown(model, question, collected):
         obs = execute_agent_action(action, collected, state)
         drills.append({k: v for k, v in obs.items() if k != "observation"})
         messages.append({"role": "user", "content": obs["observation"]})
-    answer_ask = P("answer_ask")
+    answer_ask = P("scoop_answer_ask") if mode == "scoop" else P("answer_ask")
+    answer_temp = 0.9 if mode == "scoop" else 0
+    answer_max = 2200 if mode == "scoop" else 3000
     messages.append({"role": "user", "content": answer_ask})
-    final = chat(model, messages, 0, 3000)
+    final = chat(model, messages, answer_temp, answer_max)
     stray = parse_agent_action(final)
     for _ in range(3):
         if not stray:
@@ -575,13 +577,13 @@ def synthesize_with_drilldown(model, question, collected):
         drills.append({k: v for k, v in obs.items() if k != "observation"} | {"phase": "final"})
         messages.append({"role": "assistant", "content": final})
         messages.append({"role": "user", "content": f"{obs['observation']}\n\n{answer_ask}"})
-        final = chat(model, messages, 0, 3000)
+        final = chat(model, messages, answer_temp, answer_max)
         stray = parse_agent_action(final)
     return final, drills
 
 
-def gather_fast(model: str, question: str) -> dict:
-    trace = {"mode": "fast"}
+def gather_fast(model: str, question: str, mode: str = "fast") -> dict:
+    trace = {"mode": mode}
     sq, reason = plan_search(model, question)
     trace["search_query"] = sq
     trace["plan_reason"] = reason
@@ -598,12 +600,12 @@ def gather_fast(model: str, question: str) -> dict:
         got = download_for_llm(pick, question, MAX_LLM_ROWS)
         trace["rows"] = f"{len(got['used'])}/{len(got['rows'])}{'+' if got['truncated'] else ''}"
         trace["completeness"] = rows_note(got)
-        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, [got])
+        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, [got], mode)
         trace["status"] = "ok"
     except Exception as e:
         trace["status"] = "download_failed"
         trace["error"] = str(e)[:200]
-        trace["answer"] = chat(model, metadata_messages(question, slim(candidates[:FAST_METADATA_CANDIDATES])), 0, 2000)
+        trace["answer"] = chat(model, metadata_messages(question, slim(candidates[:FAST_METADATA_CANDIDATES]), mode), 0.9 if mode == "scoop" else 0, 2000)
     return trace
 
 
@@ -648,7 +650,7 @@ def gather_deep(model: str, question: str) -> dict:
     trace["dataset_ids"] = [c["id"] for c in collected]
     trace["completeness"] = [rows_note(c) for c in collected]
     if collected:
-        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected)
+        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected, "deep" if len(collected) > 1 else "fast")
         trace["status"] = "ok"
     else:
         trace["status"] = "metadata_only"
@@ -657,12 +659,12 @@ def gather_deep(model: str, question: str) -> dict:
 
 
 def run_one(model: str, mode: str, question: str) -> dict:
-    return gather_deep(model, question) if mode == "deep" else gather_fast(model, question)
+    return gather_deep(model, question) if mode == "deep" else gather_fast(model, question, mode)
 
 
 def main():
     ap = argparse.ArgumentParser(description="NDAP query regression test (shares prompts.json with the web app).")
-    ap.add_argument("--mode", choices=["fast", "deep"], help="Mode for --query/--homepage/--srit items (suite items carry their own).")
+    ap.add_argument("--mode", choices=["fast", "deep", "scoop"], help="Mode for --query/--homepage/--srit items (suite items carry their own).")
     ap.add_argument("--model", default="google/gemini-2.5-flash")
     ap.add_argument("--srit", type=Path, help="SRIT template markdown to parse queries from")
     ap.add_argument("--homepage", action="store_true", help="Run the 4 homepage chips")

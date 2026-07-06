@@ -119,7 +119,7 @@
     .pill.ok .dot { background: var(--green); box-shadow: 0 0 10px rgba(31,157,87,.5); }
     .pill.warn .dot { background: #e8a33d; box-shadow: 0 0 10px rgba(232,163,61,.5); }
 
-    /* Fast / Deep mode toggle (per chat) */
+    /* Fast / Deep / Scoop mode toggle (per chat) */
     .mode-toggle {
       display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
       background: #eef1f6; border: 1px solid var(--line); border-radius: 999px; padding: 3px;
@@ -133,6 +133,7 @@
     .mode-toggle button:hover { color: var(--navy); }
     .mode-toggle button.active { background: #fff; color: var(--navy); box-shadow: 0 1px 3px rgba(25,44,109,.12); }
     .mode-toggle button[data-mode="deep"].active { color: var(--blue); }
+    .mode-toggle button[data-mode="scoop"].active { color: #e8590c; }
     .mode-toggle button:disabled { cursor: not-allowed; opacity: .55; }
 
     .icon-btn {
@@ -550,6 +551,10 @@
                 <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg></span>
                 <span><strong>Deep</strong> reads more datasets and reflects across rounds for harder, multi-part questions.</span>
               </div>
+              <div class="mode-line">
+                <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></span>
+                <span><strong>Scoop</strong> tells the story behind the numbers in a punchy, opinionated voice — still grounded in cited NDAP data.</span>
+              </div>
             </div>
           </div>
 
@@ -576,8 +581,8 @@
 
     <div class="composer-wrap">
       <div class="composer-tools">
-        <span class="chat-mode-note">Mode for next answer</span>
-        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for next answer" title="Mode for next answer">
+        <span class="chat-mode-note">Choose mode for this chat</span>
+        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for this chat" title="Choose mode for this chat">
           <button type="button" data-mode="fast" class="active">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
             Fast
@@ -585,6 +590,10 @@
           <button type="button" data-mode="deep">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             Deep
+          </button>
+          <button type="button" data-mode="scoop">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
+            Scoop
           </button>
         </div>
       </div>
@@ -596,7 +605,7 @@
           </svg>
         </button>
       </div>
-      <div class="composer-hint">Enter to send · Shift+Enter for newline · Switch Fast/Deep anytime before sending · Key &amp; model live in Settings (top-right)</div>
+      <div class="composer-hint">Enter to send · Shift+Enter for newline · Pick Fast / Deep / Scoop before the first message — the mode then locks for this chat · Key &amp; model live in Settings (top-right)</div>
       <div class="composer-disclaimer">Prototype · not an official NDAP, NITI Aayog, or Government of India product. Verify figures before relying on them.</div>
     </div>
   </div>
@@ -683,6 +692,8 @@
     const SRC_DISPLAY_CAP = 30;       // candidates rendered in the Sources panel
     const RUN_DEADLINE_FAST_MS = 120000; // overall wall-clock ceiling per Fast run
     const RUN_DEADLINE_DEEP_MS = 300000;  // overall wall-clock ceiling per Deep run
+    const SCOOP_TEMPERATURE = 0.9;    // final-answer temperature for Scoop mode
+    const SCOOP_MAX_OUT = 2200;       // final-answer token budget for Scoop mode
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
@@ -1474,7 +1485,7 @@
       if (!cc) return;
       const full = (answer || "").trim();
       const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
-      const turnMode = mode === "deep" ? "deep" : "fast";
+      const turnMode = normalizeMode(mode);
       cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed, mode: turnMode });
       if (cc.convo.length > MAX_TURNS * 2) cc.convo = cc.convo.slice(-MAX_TURNS * 2);
       cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), mode: turnMode, model: settings.model, answeredAt: Date.now() });
@@ -1496,20 +1507,35 @@
       return { id: (crypto.randomUUID ? crypto.randomUUID() : "c" + Date.now() + Math.random().toString(16).slice(2)), title: "", mode: "fast", createdAt: Date.now(), updatedAt: Date.now(), convo: [], transcript: [] };
     }
     function currentChat() { return chats.find((c) => c.id === currentChatId) || null; }
-    function chatMode() { const c = currentChat(); return c && c.mode === "deep" ? "deep" : "fast"; }
+    function normalizeMode(mode) {
+      const m = String(mode || "fast").toLowerCase();
+      return m === "deep" || m === "scoop" ? m : "fast";
+    }
+    function modeLocked(chat = currentChat()) {
+      return !!(chat && Array.isArray(chat.transcript) && chat.transcript.length);
+    }
+    function chatMode() { const c = currentChat(); return normalizeMode(c && c.mode); }
     function setChatMode(mode) {
       const c = currentChat();
-      if (!c || busy) return;
-      c.mode = mode === "deep" ? "deep" : "fast";
+      if (!c || busy || modeLocked(c)) return;
+      c.mode = normalizeMode(mode);
       saveChats();
       renderModeToggle();
+      renderChips();
     }
     function renderModeToggle() {
       const box = $("modeToggle");
       if (!box) return;
       const mode = chatMode();
+      const locked = modeLocked();
+      box.title = locked ? "Mode locked for this chat" : "Choose mode for this chat";
+      box.setAttribute("aria-label", box.title);
+      const note = document.querySelector(".chat-mode-note");
+      if (note) note.textContent = locked ? "Mode locked for this chat" : "Choose mode for this chat";
       box.querySelectorAll("button").forEach((b) => {
         b.classList.toggle("active", b.dataset.mode === mode);
+        b.disabled = busy || locked;
+        b.title = locked ? "Mode locked for this chat" : `Start this chat in ${modeLabel(b.dataset.mode)} mode`;
       });
     }
     function saveChats() {
@@ -1659,7 +1685,7 @@
     function toggleSidebar() { $("sidebar").classList.contains("open") ? closeSidebar() : openSidebar(); }
 
     function modeLabel(mode) {
-      return mode === "deep" ? "Deep" : "Fast";
+      return mode === "deep" ? "Deep" : mode === "scoop" ? "Scoop" : "Fast";
     }
 
     function agentWho(mode) {
@@ -2139,17 +2165,17 @@
       const counts = partial ? `${c.used.length} of ${c.rows.length}${c.truncated ? "+" : ""} fetched` : `${c.used.length} (all rows)`;
       return `Rows provided: ${counts} — ${flag}`;
     }
-    function metadataMessages(question, candidates, histPreamble) {
+    function metadataMessages(question, candidates, histPreamble, mode) {
       return [
-        { role: "system", content: P("metadata_sys") },
+        { role: "system", content: P(mode === "scoop" ? "scoop_metadata_sys" : "metadata_sys") },
         { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
       ];
     }
 
     // Initial synthesis messages. Real-numbers mode starts with tiny previews; the
     // model can request more browser-local tool actions before the final answer.
-    function dataInitialMessages(question, collected, histPreamble, deep) {
-      const sys = deep ? P("data_sys_multi") : P("data_sys_single");
+    function dataInitialMessages(question, collected, histPreamble, mode) {
+      const sys = mode === "deep" ? P("data_sys_multi") : mode === "scoop" ? P("scoop_sys_single") : P("data_sys_single");
       const blocks = collected.map((c) => {
         const hidden = c.used.length < c.rows.length;
         const profile = hidden ? `\n${profileText(c)}` : "";
@@ -2243,8 +2269,8 @@
 
     // Synthesis with a bounded browser-local agent loop. The model chooses tool
     // actions; the page validates, executes, and feeds observations back.
-    async function synthesizeWithDrilldown(question, collected, history, ui, deep, onDelta, maxOut) {
-      const messages = dataInitialMessages(question, collected, convoBlock(history), deep);
+    async function synthesizeWithDrilldown(question, collected, history, ui, mode, onDelta, maxOut) {
+      const messages = dataInitialMessages(question, collected, convoBlock(history), mode);
       const state = {
         downloads: collected.length,
         rowsReturned: collected.reduce((n, c) => n + c.used.length, 0),
@@ -2267,8 +2293,9 @@
       }
       throwIfRunAborted();
 
-      const ANSWER_ASK = P("answer_ask");
-      const answer = () => streamOrComplete(messages, 0, onDelta, maxOut);
+      const ANSWER_ASK = mode === "scoop" ? P("scoop_answer_ask") : P("answer_ask");
+      const answerTemp = mode === "scoop" ? SCOOP_TEMPERATURE : 0;
+      const answer = () => streamOrComplete(messages, answerTemp, onDelta, maxOut);
       messages.push({ role: "user", content: ANSWER_ASK });
       let finalText = await answer();
 
@@ -2321,7 +2348,7 @@
     }
 
     // Fast: one plan → search → best dataset → synthesize.
-    async function gatherFast(question, history, ui) {
+    async function gatherFast(question, history, ui, mode = "fast") {
       const planStep = liveStep(ui, "plan_search", history ? "calling model (with prior context)…" : "calling model…", { state: "run" });
       const plan = await planSearch(question, history);
       planStep.done("model proposed search terms", `query: ${plan.search_query}\nreason: ${plan.reason}`);
@@ -2341,7 +2368,7 @@
         const got = await downloadForLLM(pick, question, ui);
         if (got) return { collected: [got], usedDataset: `${got.id} (${got.name})` };
       }
-      return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre), usedDataset: "" };
+      return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre, mode), usedDataset: "" };
     }
 
     // Deep: multi-angle plan → select+download several → reflect → loop → synthesize across sources.
@@ -2421,7 +2448,7 @@
         sendBtn.setAttribute("aria-label", "Send");
         sendBtn.innerHTML = SEND_ICON_HTML;
       }
-      $("modeToggle").querySelectorAll("button").forEach((b) => { b.disabled = state; });
+      renderModeToggle();
     }
 
     function stopRun() {
@@ -2466,13 +2493,13 @@
       if (cc0 && !cc0.title) { cc0.title = titleFromQuestion(question); cc0.updatedAt = Date.now(); saveChats(); renderChatList(); }
 
       const history = compressedHistory();
-      ui.procMeta.textContent = deep ? "deep research…" : "working…";
+        ui.procMeta.textContent = deep ? "deep research…" : (modeUsed === "scoop" ? "scoop mode…" : "working…");
       let usedDataset = "";
       try {
         // 1-4) gather evidence (fast = single pass; deep = multi-angle reflect loop)
         const result = deep
           ? await gatherDeep(question, history, ui)
-          : await gatherFast(question, history, ui);
+          : await gatherFast(question, history, ui, modeUsed);
 
         if (result.none) {
           ui.procMeta.textContent = "done";
@@ -2482,17 +2509,18 @@
           return;
         }
         usedDataset = result.usedDataset || "";
-        const maxOut = deep ? 2800 : 1800;
+        const maxOut = deep ? 2800 : modeUsed === "scoop" ? SCOOP_MAX_OUT : 1800;
 
         // 5) synthesize (streamed). Data path runs a model-driven "read more rows" loop first.
-        const synthStep = liveStep(ui, "synthesize_answer", deep ? "synthesizing across sources…" : "streaming grounded answer…", { state: "run" });
+        const synthLabel = deep ? "synthesizing across sources…" : (modeUsed === "scoop" ? "writing the scoop…" : "streaming grounded answer…");
+        const synthStep = liveStep(ui, "synthesize_answer", synthLabel, { state: "run" });
         ui.answer.classList.add("cursor");
         const onDelta = (full) => { renderInto(ui.answer, full); scrollDown(); };
         let finalText = "";
         if (result.collected) {
-          finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, deep, onDelta, maxOut);
+          finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, modeUsed, onDelta, maxOut);
         } else {
-          finalText = await streamOrComplete(result.messages, 0, onDelta, maxOut);
+          finalText = await streamOrComplete(result.messages, modeUsed === "scoop" ? SCOOP_TEMPERATURE : 0, onDelta, maxOut);
         }
         if (!String(finalText || "").trim()) throw new EmptyAnswerError();
         ui.answer.classList.remove("cursor");
@@ -2513,7 +2541,7 @@
           ui.proc.open = true;
           const limitSec = Math.round((runAbort?.deadlineMs || deadlineMs) / 1000);
           const note = reason === "deadline"
-            ? `Stopped after ${limitSec}s (time limit) — try Fast mode or a narrower question.`
+            ? `Stopped after ${limitSec}s (time limit) — start a new Fast chat or ask a narrower question.`
             : "Stopped.";
           if (partial) {
             ui.answer.appendChild(el("div", "err", escapeHtml(note)));
@@ -2535,16 +2563,32 @@
     }
 
     /* ---------- wiring ---------- */
-    const CHIPS = [
-      "Compare India's total slum population in 2001 vs 2011 and break it down by sex, with the change and growth rate.",
-      "Which NDAP datasets would I join to correlate state-level rainfall with crop production over time, and what's the geography/time overlap?",
-      "Study the link between district literacy and school enrolment by social category — identify the datasets and how to combine them.",
-      "Track how the urban slum share of population shifted from 2001 to 2011 and which datasets reveal the state-level drivers.",
-    ];
+    const CHIPS_BY_MODE = {
+      fast: [
+        "What was India's total slum population in 2011? Show the dataset and the exact figure.",
+        "Which NDAP dataset has state-wise crop production by year?",
+        "Compare female literacy across Indian states using the latest available NDAP data.",
+        "Find the best NDAP dataset for district-level school enrolment by social category.",
+      ],
+      deep: [
+        "Compare India's total slum population in 2001 vs 2011 and break it down by sex, with the change and growth rate.",
+        "Which NDAP datasets would I join to correlate state-level rainfall with crop production over time, and what's the geography/time overlap?",
+        "Study the link between district literacy and school enrolment by social category — identify the datasets and how to combine them.",
+        "Track how the urban slum share of population shifted from 2001 to 2011 and which datasets reveal the state-level drivers.",
+      ],
+      scoop: [
+        "Write a punchy Scoop on what India's 2011 slum population says about urban growth.",
+        "Tell the story of female labour force participation in India using the strongest NDAP evidence you can find.",
+        "Give me a data-journalism take on which states stand out in literacy and why the numbers matter.",
+        "Turn NDAP crop production data into a short, headline-led story with a careful forecast.",
+      ],
+    };
     function renderChips() {
       const box = $("chips");
       if (!box) return;
-      CHIPS.forEach((c) => {
+      box.innerHTML = "";
+      const chips = CHIPS_BY_MODE[chatMode()] || CHIPS_BY_MODE.fast;
+      chips.forEach((c) => {
         const b = el("button", "chip", escapeHtml(c));
         b.onclick = () => { $("input").value = c; autoGrow(); run(); };
         box.appendChild(b);
