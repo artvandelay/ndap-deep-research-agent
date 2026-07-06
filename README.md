@@ -122,7 +122,7 @@ While an answer is running, the Send button becomes **Stop**. Stopping cancels t
 Open Settings (gear icon, top-right) and enter:
 
 - your OpenRouter API key (stored only in your browser's localStorage, sent directly to OpenRouter),
-- an OpenRouter model slug such as `openai/gpt-5.5`, `anthropic/claude-sonnet-4.6`, or another model on your account,
+- an OpenRouter model slug such as `openai/gpt-5.4-nano`, `anthropic/claude-sonnet-4.6`, or another model on your account,
 - optionally, a Data proxy URL to enable real numbers (see below),
 - **Max datasets to search** — how many candidate datasets the index search surfaces for the model to choose from (default `100`; applies to both modes),
 - **Deep mode: datasets to analyze** — how many datasets Deep mode will download and analyze per run (default `3`).

@@ -623,9 +623,9 @@
 
       <label for="modelInput">Model slug</label>
       <div class="field">
-        <input id="modelInput" placeholder="openai/gpt-5.5" autocomplete="off" spellcheck="false" />
+        <input id="modelInput" placeholder="openai/gpt-5.4-nano" autocomplete="off" spellcheck="false" />
       </div>
-      <p class="help">Any OpenRouter model, e.g. <code>openai/gpt-5.5</code>, <code>anthropic/claude-sonnet-4.6</code>, <code>moonshotai/kimi-k2.7</code>.</p>
+      <p class="help">Any OpenRouter model, e.g. <code>openai/gpt-5.4-nano</code>, <code>anthropic/claude-sonnet-4.6</code>, <code>moonshotai/kimi-k2.7</code>.</p>
 
       <label for="proxyInput">Data proxy URL <span style="color:var(--faint);font-weight:500">(optional)</span></label>
       <div class="field">
@@ -659,7 +659,7 @@
     const MAX_SAVED_TURNS = 40;        // how many Q&A pairs to keep per chat on disk
     const MAX_SAVED_ANSWER_CHARS = 12000;
     const MAX_CHATS = 50;              // how many conversations to keep
-    const DEFAULT_MODEL = "openai/gpt-5.5";
+    const DEFAULT_MODEL = "openai/gpt-5.4-nano";
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
