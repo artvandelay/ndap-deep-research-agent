@@ -18,7 +18,7 @@ The project is designed for deep-research agents that need to discover relevant 
 - A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each chat starts in one locked mode chosen from the **Fast / Deep / Scoop** toggle, and shows a visible agent trace. Long runs can be stopped from the composer and have mode-specific wall-clock ceilings. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
   - **Fast**: a single pass — plan one search → retrieve candidates → pick the single best dataset → (optionally) download it → synthesize.
   - **Deep**: a bounded research loop — decompose the question into several search angles → gather a candidate pool → select and download multiple datasets → reflect on coverage and search again to fill gaps → synthesize across all sources.
-  - **Scoop**: the Fast pipeline with a data-journalist voice — headline, bold lede, the story told through the numbers, plus a labeled "The Take" section for opinions and forecasts derived from the cited rows. Every figure is still NDAP-only.
+  - **Scoop**: the Deep evidence loop with a data-journalist voice — it hunts across datasets for the story, writes a headline and bold lede, then adds a labeled "The Take" section for opinions and forecasts derived from the cited rows. Every figure is still NDAP-only.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -117,9 +117,9 @@ Each chat starts in **Fast**, **Deep**, or **Scoop**, chosen with the toggle bef
 
 - **Fast** — one model-planned search → retrieve candidates → pick the single best dataset → (real-numbers mode) download it → synthesize a grounded answer. Lowest latency and cost.
 - **Deep** — the model decomposes the question into several search angles, gathers a wider candidate pool, then selects and downloads multiple datasets, reflecting between rounds to fill gaps before synthesizing across all of them. Better for questions that need to combine datasets (e.g. rainfall × crop production), at higher latency and cost.
-- **Scoop** — the Fast pipeline with a data-journalist persona: an H3 headline, a bold one-line lede, the story told through real NDAP numbers, then a "The Take" section whose bullets are labeled *Opinion* or *Forecast* and derived from the cited rows, closing with a one-line disclaimer. Same latency profile and 2-minute ceiling as Fast; answers are creative in tone but never in the numbers.
+- **Scoop** — the Deep evidence loop with an investigative data-journalist persona: it searches across datasets for the story, opens with an H3 headline and bold lede, tells the case through real NDAP numbers, then adds a "The Take" section whose bullets are labeled *Opinion* or *Forecast* and derived from the cited rows. Same deeper latency profile and 5-minute ceiling as Deep; answers are creative in tone but never in the numbers.
 
-While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast and Scoop stop after 2 minutes and Deep stops after 5 minutes, with a timeout note instead of hanging indefinitely.
+While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast stops after 2 minutes; Deep and Scoop stop after 5 minutes, with a timeout note instead of hanging indefinitely.
 
 Open Settings (gear icon, top-right) and enter:
 

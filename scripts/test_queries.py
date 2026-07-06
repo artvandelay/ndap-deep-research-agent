@@ -566,7 +566,7 @@ def synthesize_with_drilldown(model, question, collected, mode):
         messages.append({"role": "user", "content": obs["observation"]})
     answer_ask = P("scoop_answer_ask") if mode == "scoop" else P("answer_ask")
     answer_temp = 0.9 if mode == "scoop" else 0
-    answer_max = 2200 if mode == "scoop" else 3000
+    answer_max = 3000
     messages.append({"role": "user", "content": answer_ask})
     final = chat(model, messages, answer_temp, answer_max)
     stray = parse_agent_action(final)
@@ -609,8 +609,8 @@ def gather_fast(model: str, question: str, mode: str = "fast") -> dict:
     return trace
 
 
-def gather_deep(model: str, question: str) -> dict:
-    trace = {"mode": "deep"}
+def gather_deep(model: str, question: str, mode: str = "deep") -> dict:
+    trace = {"mode": mode}
     queries, reason = plan_deep(model, question)
     trace["plan_queries"] = queries
     trace["plan_reason"] = reason
@@ -650,16 +650,16 @@ def gather_deep(model: str, question: str) -> dict:
     trace["dataset_ids"] = [c["id"] for c in collected]
     trace["completeness"] = [rows_note(c) for c in collected]
     if collected:
-        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected, "deep" if len(collected) > 1 else "fast")
+        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected, mode)
         trace["status"] = "ok"
     else:
         trace["status"] = "metadata_only"
-        trace["answer"] = chat(model, metadata_messages(question, slim(pool[:16])), 0, 2000)
+        trace["answer"] = chat(model, metadata_messages(question, slim(pool[:16]), mode), 0.9 if mode == "scoop" else 0, 3000 if mode == "scoop" else 2000)
     return trace
 
 
 def run_one(model: str, mode: str, question: str) -> dict:
-    return gather_deep(model, question) if mode == "deep" else gather_fast(model, question, mode)
+    return gather_deep(model, question, mode) if mode in {"deep", "scoop"} else gather_fast(model, question, mode)
 
 
 def main():

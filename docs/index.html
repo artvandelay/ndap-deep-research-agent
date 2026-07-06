@@ -556,7 +556,7 @@
               </div>
               <div class="mode-line">
                 <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></span>
-                <span><strong>Scoop</strong> tells the story behind the numbers in a punchy, opinionated voice — still grounded in cited NDAP data.</span>
+                <span><strong>Scoop</strong> investigates across datasets like Deep, then writes the story in a sharp, opinionated voice.</span>
               </div>
             </div>
           </div>
@@ -649,13 +649,13 @@
       <div class="field">
         <input id="searchMaxInput" type="number" min="10" max="500" placeholder="100" />
       </div>
-      <p class="help">How many candidate datasets the index search surfaces for the model to choose from (applies to Fast and Deep). Higher = broader recall, more tokens.</p>
+      <p class="help">How many candidate datasets the index search surfaces for the model to choose from (applies to Fast, Deep, and Scoop). Higher = broader recall, more tokens.</p>
 
-      <label for="deepDownloadsInput">Deep mode: datasets to analyze</label>
+      <label for="deepDownloadsInput">Deep/Scoop mode: datasets to analyze</label>
       <div class="field">
         <input id="deepDownloadsInput" type="number" min="1" max="8" placeholder="3" />
       </div>
-      <p class="help">In Deep mode the agent downloads and analyzes up to this many datasets (real-numbers mode), reflecting between rounds to fill gaps. Higher = more thorough but slower and costlier.</p>
+      <p class="help">In Deep and Scoop modes the agent downloads and analyzes up to this many datasets (real-numbers mode), reflecting between rounds to fill gaps. Higher = more thorough but slower and costlier.</p>
 
       <div class="actions">
         <button id="saveSettings" class="btn-primary">Save</button>
@@ -696,7 +696,7 @@
     const RUN_DEADLINE_FAST_MS = 120000; // overall wall-clock ceiling per Fast run
     const RUN_DEADLINE_DEEP_MS = 300000;  // overall wall-clock ceiling per Deep run
     const SCOOP_TEMPERATURE = 0.9;    // final-answer temperature for Scoop mode
-    const SCOOP_MAX_OUT = 2200;       // final-answer token budget for Scoop mode
+    const SCOOP_MAX_OUT = 3000;       // deeper investigative answer budget for Scoop mode
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
@@ -2375,7 +2375,7 @@
     }
 
     // Deep: multi-angle plan → select+download several → reflect → loop → synthesize across sources.
-    async function gatherDeep(question, history, ui) {
+    async function gatherDeep(question, history, ui, mode = "deep") {
       const planStep = liveStep(ui, "plan_research", "decomposing question into data needs…", { state: "run" });
       const plan = await planDeep(question, history);
       planStep.done(`${plan.queries.length} search angle${plan.queries.length === 1 ? "" : "s"}`,
@@ -2390,7 +2390,7 @@
       if (!pool.length) return { none: true };
 
       const pre = convoBlock(history);
-      const metaFallback = () => ({ messages: metadataMessages(question, pool.slice(0, Math.max(FAST_METADATA_CANDIDATES, 16)), pre), usedDataset: "" });
+      const metaFallback = () => ({ messages: metadataMessages(question, pool.slice(0, Math.max(FAST_METADATA_CANDIDATES, 16)), pre, mode), usedDataset: "" });
       if (!settings.proxy) return metaFallback();
 
       const budget = settings.deepDownloads;
@@ -2476,8 +2476,10 @@
 
       const modeUsed = chatMode();
       const deep = modeUsed === "deep";
+      const scoop = modeUsed === "scoop";
+      const deepEvidence = deep || scoop;
       const controller = new AbortController();
-      const deadlineMs = deep ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
+      const deadlineMs = deepEvidence ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
       runAbort = { controller, reason: null, deadlineMs };
       let deadlineTimer = setTimeout(() => {
         if (runAbort) runAbort.reason = "deadline";
@@ -2496,12 +2498,12 @@
       if (cc0 && !cc0.title) { cc0.title = titleFromQuestion(question); cc0.updatedAt = Date.now(); saveChats(); renderChatList(); }
 
       const history = compressedHistory();
-        ui.procMeta.textContent = deep ? "deep research…" : (modeUsed === "scoop" ? "scoop mode…" : "working…");
+      ui.procMeta.textContent = deep ? "deep research…" : (scoop ? "investigative scoop…" : "working…");
       let usedDataset = "";
       try {
         // 1-4) gather evidence (fast = single pass; deep = multi-angle reflect loop)
-        const result = deep
-          ? await gatherDeep(question, history, ui)
+        const result = deepEvidence
+          ? await gatherDeep(question, history, ui, modeUsed)
           : await gatherFast(question, history, ui, modeUsed);
 
         if (result.none) {
@@ -2512,10 +2514,10 @@
           return;
         }
         usedDataset = result.usedDataset || "";
-        const maxOut = deep ? 2800 : modeUsed === "scoop" ? SCOOP_MAX_OUT : 1800;
+        const maxOut = scoop ? SCOOP_MAX_OUT : (deep ? 2800 : 1800);
 
         // 5) synthesize (streamed). Data path runs a model-driven "read more rows" loop first.
-        const synthLabel = deep ? "synthesizing across sources…" : (modeUsed === "scoop" ? "writing the scoop…" : "streaming grounded answer…");
+        const synthLabel = deep ? "synthesizing across sources…" : (scoop ? "writing the investigative scoop…" : "streaming grounded answer…");
         const synthStep = liveStep(ui, "synthesize_answer", synthLabel, { state: "run" });
         ui.answer.classList.add("cursor");
         const onDelta = (full) => { renderInto(ui.answer, full); scrollDown(); };
@@ -2523,7 +2525,7 @@
         if (result.collected) {
           finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, modeUsed, onDelta, maxOut);
         } else {
-          finalText = await streamOrComplete(result.messages, modeUsed === "scoop" ? SCOOP_TEMPERATURE : 0, onDelta, maxOut);
+          finalText = await streamOrComplete(result.messages, scoop ? SCOOP_TEMPERATURE : 0, onDelta, maxOut);
         }
         if (!String(finalText || "").trim()) throw new EmptyAnswerError();
         ui.answer.classList.remove("cursor");
@@ -2544,7 +2546,7 @@
           ui.proc.open = true;
           const limitSec = Math.round((runAbort?.deadlineMs || deadlineMs) / 1000);
           const note = reason === "deadline"
-            ? `Stopped after ${limitSec}s (time limit) — start a new Fast chat or ask a narrower question.`
+            ? `Stopped after ${limitSec}s (time limit) — start a narrower chat or reduce Deep/Scoop scope.`
             : "Stopped.";
           if (partial) {
             ui.answer.appendChild(el("div", "err", escapeHtml(note)));
@@ -2580,10 +2582,10 @@
         "Track how the urban slum share of population shifted from 2001 to 2011 and which datasets reveal the state-level drivers.",
       ],
       scoop: [
-        "Write a punchy Scoop on what India's 2011 slum population says about urban growth.",
-        "Tell the story of female labour force participation in India using the strongest NDAP evidence you can find.",
-        "Give me a data-journalism take on which states stand out in literacy and why the numbers matter.",
-        "Turn NDAP crop production data into a short, headline-led story with a careful forecast.",
+        "Investigate the real COVID death-count story in India using every relevant NDAP dataset you can find.",
+        "Find the hidden story in India's slum data — compare years, states, and any awkward gaps in the official numbers.",
+        "Investigate female labour force participation in India: what do the strongest NDAP datasets reveal, and what's missing?",
+        "Dig through literacy and school-enrolment data to find a sharp, surprising education story worth publishing.",
       ],
     };
     function renderChips() {

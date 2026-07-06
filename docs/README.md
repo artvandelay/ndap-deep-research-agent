@@ -26,4 +26,4 @@ python scripts/export_recipes.py
 
 The published app is fully browser-side. While an answer is running, the Send
 button changes to Stop so the current OpenRouter/proxy request can be aborted.
-Fast and Scoop runs have a 2-minute wall-clock ceiling; Deep runs have a 5-minute ceiling. The chosen mode is locked after the first message in a chat.
+Fast runs have a 2-minute wall-clock ceiling; Deep and Scoop runs have a 5-minute ceiling. The chosen mode is locked after the first message in a chat.
