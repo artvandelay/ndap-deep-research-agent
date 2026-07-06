@@ -421,6 +421,8 @@
     }
     .send:hover { transform: translateY(-1px); }
     .send:disabled { opacity: .4; cursor: not-allowed; transform: none; }
+    .send.stop { background: linear-gradient(135deg, #dc2626, #b91c1c); }
+    .send.stop:hover { transform: translateY(-1px); }
     .send svg { width: 18px; height: 18px; }
     .composer-hint { max-width: 860px; margin: 8px auto 0; color: var(--faint); font-size: 11.5px; text-align: center; }
     .composer-disclaimer { max-width: 860px; margin: 3px auto 0; color: #b45309; font-size: 11px; text-align: center; opacity: .85; }
@@ -679,12 +681,15 @@
     const DEEP_MAX_ITERS = 3;         // reflect→search→download loop ceiling
     const FAST_METADATA_CANDIDATES = 12; // candidates fed to the model in fast metadata-only mode
     const SRC_DISPLAY_CAP = 30;       // candidates rendered in the Sources panel
+    const RUN_DEADLINE_FAST_MS = 120000; // overall wall-clock ceiling per Fast run
+    const RUN_DEADLINE_DEEP_MS = 300000;  // overall wall-clock ceiling per Deep run
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
     let ndapPrompts = null;       // single source of truth for prompts (assets/prompts.json)
     let busy = false;
+    let runAbort = null;          // { controller, reason, deadlineMs } for the active run
     let chats = [];               // all conversations [{id,title,createdAt,updatedAt,convo,transcript}]
     let currentChatId = null;
     let convo = [];               // compressed multi-turn memory of current chat (model context)
@@ -935,8 +940,8 @@
       return txt.trim();
     }
 
-    function buildChatJson(chat) {
-      const prov = exportProvenance(chat);
+    function buildChatJson(chat, turn) {
+      const prov = exportProvenance(chat, turn || null);
       return JSON.stringify({
         export: prov,
         transcript: chat.transcript.map((t) => ({
@@ -1003,16 +1008,15 @@
 </html>`;
     }
 
-    function buildTurnHtml(q, a, chat) {
-      const turn = { q, a };
+    function buildTurnHtml(turn, chat) {
       const prov = exportProvenance(chat, turn);
       const title = escapeHtml(prov.title);
       const turns = `
         <section class="turn">
           <div class="q-label">Question</div>
-          <div class="question">${escapeHtml(q)}</div>
+          <div class="question">${escapeHtml(turn.q)}</div>
           <div class="a-label">Answer</div>
-          <div class="answer">${renderMarkdown(a)}</div>
+          <div class="answer">${renderMarkdown(turn.a)}</div>
         </section>`;
       return `<!doctype html>
 <html lang="en">
@@ -1082,18 +1086,18 @@
       if (!spec) return;
       const prov = exportProvenance(chat, turn || null);
       const payloadChat = turn
-        ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
+        ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, mode: resolveTurnMode(turn, chat), model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
         : chat;
       if (format === "md") {
         downloadFile(`${base}.${spec.ext}`, turn ? buildSingleTurnMarkdown(chat, turn) : buildChatMarkdown(payloadChat), spec.mime);
       } else if (format === "txt") {
         downloadFile(`${base}.${spec.ext}`, buildChatText(payloadChat), spec.mime);
       } else if (format === "json") {
-        downloadFile(`${base}.${spec.ext}`, buildChatJson(payloadChat), spec.mime);
+        downloadFile(`${base}.${spec.ext}`, buildChatJson(payloadChat, turn || null), spec.mime);
       } else if (format === "html") {
-        downloadFile(`${base}.${spec.ext}`, turn ? buildTurnHtml(turn.q, turn.a, chat) : buildChatHtml(payloadChat), spec.mime);
+        downloadFile(`${base}.${spec.ext}`, turn ? buildTurnHtml(turn, chat) : buildChatHtml(payloadChat), spec.mime);
       } else if (format === "pdf") {
-        const html = turn ? buildTurnHtml(turn.q, turn.a, chat) : buildChatHtml(payloadChat);
+        const html = turn ? buildTurnHtml(turn, chat) : buildChatHtml(payloadChat);
         await exportPdfFromHtml(html, `${base}.${spec.ext}`, prov);
       }
     }
@@ -1315,13 +1319,47 @@
         "X-Title": "NDAP Deep Research Agent",
       };
     }
-    async function fetchWithTimeout(url, options = {}, ms = 180000) {
+
+    class RunStopped extends Error {
+      constructor(reason, deadlineMs) {
+        super(reason === "deadline" ? "Run deadline exceeded" : "Run stopped by user");
+        this.name = "RunStopped";
+        this.reason = reason;
+        this.deadlineMs = deadlineMs;
+      }
+    }
+
+    function combineAbortSignals(signals) {
+      if (typeof AbortSignal !== "undefined" && AbortSignal.any) return AbortSignal.any(signals);
       const ctrl = new AbortController();
-      const timer = setTimeout(() => ctrl.abort(), ms);
+      for (const sig of signals) {
+        if (sig.aborted) { ctrl.abort(); return ctrl.signal; }
+        sig.addEventListener("abort", () => ctrl.abort(), { once: true });
+      }
+      return ctrl.signal;
+    }
+
+    function throwIfRunAborted() {
+      if (runAbort?.controller.signal.aborted) {
+        throw new RunStopped(runAbort.reason || "user", runAbort.deadlineMs);
+      }
+    }
+
+    async function fetchWithTimeout(url, options = {}, ms = 180000) {
+      const timeoutCtrl = new AbortController();
+      const timer = setTimeout(() => timeoutCtrl.abort(), ms);
+      const signals = [timeoutCtrl.signal];
+      if (runAbort) signals.push(runAbort.controller.signal);
+      const signal = signals.length === 1 ? signals[0] : combineAbortSignals(signals);
       try {
-        return await fetch(url, { ...options, signal: ctrl.signal });
+        return await fetch(url, { ...options, signal });
       } catch (err) {
-        if (err && err.name === "AbortError") throw new Error(`Request timed out after ${Math.round(ms / 1000)}s`);
+        if (err && err.name === "AbortError") {
+          if (runAbort?.controller.signal.aborted) {
+            throw new RunStopped(runAbort.reason || "user", runAbort.deadlineMs);
+          }
+          throw new Error(`Request timed out after ${Math.round(ms / 1000)}s`);
+        }
         throw err;
       } finally {
         clearTimeout(timer);
@@ -2196,6 +2234,7 @@
 
       const ask = P("agentic_data_ask") || P("drill_ask");
       for (let i = 1; i <= MAX_AGENT_STEPS; i++) {
+        if (runAbort?.controller.signal.aborted) break;
         messages.push({ role: "user", content: ask });
         const resp = await orComplete(messages, 0, 700);
         const action = parseAgentAction(resp);
@@ -2207,11 +2246,17 @@
         const observation = await executeAgentAction(action, collected, state, ui);
         messages.push({ role: "user", content: observation });
       }
+      throwIfRunAborted();
 
       const ANSWER_ASK = P("answer_ask");
       const answer = async () => {
         try { return await orStream(messages, 0, onDelta, maxOut); }
-        catch (_) { const t = await orComplete(messages, 0, maxOut); onDelta(t); return t; }
+        catch (err) {
+          if (err instanceof RunStopped) throw err;
+          const t = await orComplete(messages, 0, maxOut);
+          onDelta(t);
+          return t;
+        }
       };
       messages.push({ role: "user", content: ANSWER_ASK });
       let finalText = await answer();
@@ -2220,11 +2265,13 @@
       // Honor it once and ask again rather than showing raw JSON to the user.
       let stray = parseAgentAction(finalText);
       for (let i = 0; stray && i < 3; i++) {
+        if (runAbort?.controller.signal.aborted) break;
         messages.push({ role: "assistant", content: finalText });
         messages.push({ role: "user", content: `${await executeAgentAction(stray, collected, state, ui)}\n\n${ANSWER_ASK}` });
         finalText = await answer();
         stray = parseAgentAction(finalText);
       }
+      throwIfRunAborted();
       return finalText;
     }
 
@@ -2310,6 +2357,7 @@
       const downloadedIds = [];
 
       for (let iter = 1; iter <= DEEP_MAX_ITERS && collected.length < budget; iter++) {
+        if (runAbort?.controller.signal.aborted) break;
         const remaining = budget - collected.length;
         const sel = liveStep(ui, "select_datasets", `round ${iter}: choosing up to ${remaining}…`, { state: "run" });
         const { picks, reason } = await selectDatasets(question, pool, downloadedIds, remaining, history);
@@ -2337,6 +2385,7 @@
         renderSources(ui, more);
         if (!added.length) break;
       }
+      throwIfRunAborted();
 
       return collected.length
         ? { collected, usedDataset: collected.map((c) => `${c.id} (${c.name})`).join("; ") }
@@ -2344,10 +2393,36 @@
     }
 
     /* ---------- Main loop ---------- */
+    const SEND_ICON_HTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5"></path><path d="M5 12l7-7 7 7"></path></svg>';
+
     function setBusy(state) {
       busy = state;
-      $("send").disabled = state;
+      const sendBtn = $("send");
+      sendBtn.disabled = false;
+      if (state) {
+        sendBtn.classList.add("stop");
+        sendBtn.title = "Stop";
+        sendBtn.setAttribute("aria-label", "Stop");
+        sendBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="1"></rect></svg>';
+      } else {
+        sendBtn.classList.remove("stop");
+        sendBtn.title = "Send";
+        sendBtn.setAttribute("aria-label", "Send");
+        sendBtn.innerHTML = SEND_ICON_HTML;
+      }
       $("modeToggle").querySelectorAll("button").forEach((b) => { b.disabled = state; });
+    }
+
+    function stopRun() {
+      if (runAbort) {
+        runAbort.reason = "user";
+        runAbort.controller.abort();
+      }
+    }
+
+    function onSend() {
+      if (busy) stopRun();
+      else run();
     }
 
     async function run() {
@@ -2358,12 +2433,20 @@
 
       if (!settings.key) { openDrawer(); $("savedFlash").textContent = "Add your OpenRouter key to start."; return; }
 
+      const modeUsed = chatMode();
+      const deep = modeUsed === "deep";
+      const controller = new AbortController();
+      const deadlineMs = deep ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
+      runAbort = { controller, reason: null, deadlineMs };
+      let deadlineTimer = setTimeout(() => {
+        if (runAbort) runAbort.reason = "deadline";
+        controller.abort();
+      }, deadlineMs);
+
       setBusy(true);
       resetUsage();
       try { await loadPrompts(); } catch (_) { /* boot load usually has it; metadata/data prompts degrade to empty if truly missing */ }
       input.value = ""; input.style.height = "auto";
-      const modeUsed = chatMode();
-      const deep = modeUsed === "deep";
       addUser(question);
       const ui = addAssistant(modeUsed);
 
@@ -2401,6 +2484,7 @@
           try {
             finalText = await orStream(result.messages, 0, onDelta, maxOut);
           } catch (streamErr) {
+            if (streamErr instanceof RunStopped) throw streamErr;
             finalText = await orComplete(result.messages, 0, maxOut);
             renderInto(ui.answer, finalText);
           }
@@ -2416,10 +2500,28 @@
         ui.answer.appendChild(createAnswerTools(question, finalText));
       } catch (e) {
         ui.answer.classList.remove("cursor");
-        ui.procMeta.textContent = "error";
-        ui.proc.open = true;
-        ui.answer.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`;
+        if (e instanceof RunStopped || runAbort?.controller.signal.aborted) {
+          const reason = (e instanceof RunStopped ? e.reason : runAbort?.reason) || "user";
+          const partial = ui.answer.textContent?.trim() || "";
+          ui.procMeta.textContent = reason === "deadline" ? "timed out" : "stopped";
+          ui.proc.open = true;
+          const limitSec = Math.round((runAbort?.deadlineMs || deadlineMs) / 1000);
+          const note = reason === "deadline"
+            ? `Stopped after ${limitSec}s (time limit) — try Fast mode or a narrower question.`
+            : "Stopped.";
+          if (partial) {
+            ui.answer.appendChild(el("div", "err", escapeHtml(note)));
+          } else {
+            ui.answer.innerHTML = `<div class="err">${escapeHtml(note)}</div>`;
+          }
+        } else {
+          ui.procMeta.textContent = "error";
+          ui.proc.open = true;
+          ui.answer.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`;
+        }
       } finally {
+        clearTimeout(deadlineTimer);
+        runAbort = null;
         renderUsageFooter(ui.answer);
         setBusy(false);
         input.focus();
@@ -2456,9 +2558,9 @@
 
     $("input").addEventListener("input", autoGrow);
     $("input").addEventListener("keydown", (e) => {
-      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); run(); }
+      if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); onSend(); }
     });
-    $("send").addEventListener("click", run);
+    $("send").addEventListener("click", onSend);
     $("modeToggle").querySelectorAll("button").forEach((b) => {
       b.addEventListener("click", () => setChatMode(b.dataset.mode));
     });
