@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>NDAP News Factcheck</title>
+  <link rel="stylesheet" href="assets/factcheck/factcheck.css" />
+</head>
+<body>
+  <header class="fc-header">
+    <h1>NDAP News Factcheck</h1>
+    <a href="index.html">← Back to research agent</a>
+  </header>
+
+  <main class="fc-main">
+    <section class="fc-input-panel">
+      <label for="article">Paste a news article (plain text or markdown)</label>
+      <textarea id="article" placeholder="Paste the full article here…"></textarea>
+      <div class="fc-controls">
+        <div class="fc-toggle" id="modeToggle" role="group" aria-label="Verification mode">
+          <button type="button" data-mode="fast" class="active">Fast</button>
+          <button type="button" data-mode="deep">Deep</button>
+        </div>
+        <button type="button" id="run">Check facts</button>
+      </div>
+      <p class="fc-help">Uses your saved OpenRouter key and NDAP proxy from the <a href="index.html">main app settings</a>.</p>
+      <div id="status"></div>
+
+      <h2 class="fc-section-title" style="margin-top:1.25rem">Parsed claims</h2>
+      <div id="parsePanel"></div>
+
+      <h2 class="fc-section-title" style="margin-top:1.25rem">Summary</h2>
+      <div id="summary"></div>
+    </section>
+
+    <section class="fc-output-panel">
+      <h2 class="fc-section-title">Highlighted article</h2>
+      <div id="article-view"></div>
+      <div id="evidence" class="hidden"></div>
+    </section>
+  </main>
+
+  <script src="assets/factcheck/ndap-lite.js"></script>
+  <script src="assets/factcheck/extract.js"></script>
+  <script src="assets/factcheck/verify.js"></script>
+  <script src="assets/factcheck/render.js"></script>
+  <script>
+    (function () {
+      "use strict";
+
+      window.FC = window.FC || {};
+      FC.app = FC.app || {};
+
+      const $ = function (id) { return document.getElementById(id); };
+      let busy = false;
+      let mode = "fast";
+
+      function setStatus(text, isErr) {
+        const el = $("status");
+        el.textContent = text || "";
+        el.className = isErr ? "err" : "";
+      }
+
+      function chatMode() {
+        return mode;
+      }
+
+      function bindModeToggle() {
+        const box = $("modeToggle");
+        box.querySelectorAll("button").forEach(function (btn) {
+          btn.addEventListener("click", function () {
+            if (busy) return;
+            mode = btn.getAttribute("data-mode") === "deep" ? "deep" : "fast";
+            box.querySelectorAll("button").forEach(function (b) {
+              b.classList.toggle("active", b === btn);
+            });
+          });
+        });
+      }
+
+      async function runFactcheck() {
+        if (busy) return;
+        const text = ($("article").value || "").trim();
+        if (!text) {
+          setStatus("Paste an article first.", true);
+          return;
+        }
+        if (!FC.core.settings.key) {
+          setStatus("Add your OpenRouter key in the main app settings first.", true);
+          return;
+        }
+
+        busy = true;
+        $("run").disabled = true;
+        $("parsePanel").innerHTML = "";
+        $("summary").innerHTML = "";
+        $("article-view").innerHTML = "";
+        $("evidence").classList.add("hidden");
+        $("evidence").innerHTML = "";
+        setStatus("Loading NDAP index…");
+
+        try {
+          await FC.core.loadIndex();
+          await FC.core.loadPrompts();
+          setStatus("Extracting claims…");
+          const claims = await FC.extract.extractClaims(text);
+          FC.render.renderParse($("parsePanel"), claims);
+          if (!claims.length) {
+            setStatus("No checkable claims found.", true);
+            return;
+          }
+
+          const deep = chatMode() === "deep";
+          setStatus("Verifying " + claims.length + " claim(s) against NDAP…");
+          const results = await FC.verify.verifyAll(claims, {
+            deep: deep,
+            onProgress: function (done, total) {
+              setStatus("Verified " + done + " / " + total + "…");
+            },
+          });
+
+          FC.render.renderHighlights($("article-view"), text, claims, results);
+          FC.render.renderSummary($("summary"), results);
+          setStatus("Done — click a highlight for evidence.");
+        } catch (err) {
+          setStatus(String(err && err.message || err), true);
+        } finally {
+          busy = false;
+          $("run").disabled = false;
+        }
+      }
+
+      bindModeToggle();
+      $("run").addEventListener("click", runFactcheck);
+    })();
+  </script>
+</body>
+</html>

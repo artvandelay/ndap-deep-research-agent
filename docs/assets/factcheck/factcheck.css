@@ -1,0 +1,512 @@
+:root {
+  --fc-verified: #1f9d57;
+  --fc-verified-bg: rgba(31, 157, 87, 0.16);
+  --fc-verified-line: rgba(31, 157, 87, 0.45);
+  --fc-unverified: #b7791f;
+  --fc-unverified-bg: rgba(232, 163, 61, 0.22);
+  --fc-unverified-line: rgba(232, 163, 61, 0.55);
+  --fc-contradicted: #d4351c;
+  --fc-contradicted-bg: rgba(212, 53, 28, 0.14);
+  --fc-contradicted-line: rgba(212, 53, 28, 0.45);
+  --fc-line: #e2e4e7;
+  --fc-panel: #ffffff;
+  --fc-text: #1c2433;
+  --fc-muted: #5b6573;
+  --fc-faint: #8b94a3;
+  --fc-radius: 14px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Highlight marks                                                     */
+/* ------------------------------------------------------------------ */
+mark.fc {
+  padding: 0.05em 0.15em;
+  border-radius: 4px;
+  cursor: pointer;
+  color: inherit;
+  transition: box-shadow 0.15s, filter 0.15s;
+}
+mark.fc:hover,
+mark.fc:focus {
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(25, 44, 109, 0.28);
+  filter: saturate(1.15);
+}
+.fc-verified {
+  background: var(--fc-verified-bg);
+  box-shadow: inset 0 -0.12em 0 var(--fc-verified-line);
+}
+.fc-unverified {
+  background: var(--fc-unverified-bg);
+  box-shadow: inset 0 -0.12em 0 var(--fc-unverified-line);
+}
+.fc-contradicted {
+  background: var(--fc-contradicted-bg);
+  box-shadow: inset 0 -0.12em 0 var(--fc-contradicted-line);
+}
+
+/* Swatches / dots shared token */
+.fc-swatch {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border-radius: 3px;
+  flex: 0 0 auto;
+}
+.fc-swatch.fc-verified {
+  background: var(--fc-verified);
+  box-shadow: none;
+}
+.fc-swatch.fc-unverified {
+  background: var(--fc-unverified);
+  box-shadow: none;
+}
+.fc-swatch.fc-contradicted {
+  background: var(--fc-contradicted);
+  box-shadow: none;
+}
+
+/* ------------------------------------------------------------------ */
+/* Article view                                                        */
+/* ------------------------------------------------------------------ */
+.fc-article-text {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.75;
+  font-size: 15px;
+  color: var(--fc-text);
+}
+.fc-unlocatable {
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px dashed var(--fc-line);
+  border-radius: 10px;
+  background: #fafbfd;
+  color: var(--fc-muted);
+  font-size: 12.5px;
+}
+
+/* ------------------------------------------------------------------ */
+/* Parse panel                                                         */
+/* ------------------------------------------------------------------ */
+.fc-parse-empty {
+  color: var(--fc-faint);
+  font-size: 13px;
+  padding: 14px;
+  text-align: center;
+}
+.fc-parse-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fc-parse-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--fc-line);
+  border-radius: var(--fc-radius);
+  background: var(--fc-panel);
+}
+.fc-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 999px;
+  margin-top: 5px;
+  flex: 0 0 auto;
+  background: var(--fc-faint);
+}
+.fc-dot.fc-verified {
+  background: var(--fc-verified);
+  box-shadow: 0 0 8px rgba(31, 157, 87, 0.5);
+}
+.fc-dot.fc-unverified {
+  background: var(--fc-unverified);
+  box-shadow: 0 0 8px rgba(232, 163, 61, 0.5);
+}
+.fc-dot.fc-contradicted {
+  background: var(--fc-contradicted);
+  box-shadow: 0 0 8px rgba(212, 53, 28, 0.5);
+}
+.fc-parse-body {
+  flex: 1;
+  min-width: 0;
+}
+.fc-parse-head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 6px;
+}
+.fc-parse-id {
+  font-weight: 800;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fc-muted);
+}
+.fc-parse-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.fc-parse-tag {
+  font-size: 11px;
+  color: var(--fc-muted);
+  background: #eef1f6;
+  border: 1px solid var(--fc-line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+.fc-parse-quote {
+  margin: 0;
+  padding: 0 0 0 10px;
+  border-left: 3px solid var(--fc-line);
+  color: var(--fc-text);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Summary chips                                                       */
+/* ------------------------------------------------------------------ */
+.fc-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.fc-summary-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.fc-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--fc-text);
+  border: 1px solid var(--fc-line);
+  background: var(--fc-panel);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+.fc-chip strong {
+  font-weight: 800;
+}
+.fc-legend {
+  font-size: 11.5px;
+  color: var(--fc-faint);
+  line-height: 1.5;
+}
+
+/* ------------------------------------------------------------------ */
+/* Evidence panel                                                      */
+/* ------------------------------------------------------------------ */
+.fc-evidence {
+  border: 1px solid var(--fc-line);
+  border-left: 4px solid var(--fc-faint);
+  border-radius: var(--fc-radius);
+  background: var(--fc-panel);
+  padding: 14px;
+  font-size: 13.5px;
+  color: var(--fc-text);
+}
+.fc-ev-verified {
+  border-left-color: var(--fc-verified);
+}
+.fc-ev-unverified {
+  border-left-color: var(--fc-unverified);
+}
+.fc-ev-contradicted {
+  border-left-color: var(--fc-contradicted);
+}
+.fc-ev-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+.fc-ev-status {
+  font-weight: 800;
+  font-size: 13px;
+}
+.fc-ev-id {
+  margin-left: auto;
+  font-size: 11px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  color: var(--fc-faint);
+}
+.fc-ev-quote {
+  margin: 0 0 12px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--fc-line);
+  background: #fafbfd;
+  border-radius: 0 8px 8px 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--fc-muted);
+}
+.fc-ev-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 14px;
+  margin: 0 0 12px;
+}
+.fc-ev-grid dt {
+  font-size: 11.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--fc-faint);
+  font-weight: 700;
+  align-self: center;
+}
+.fc-ev-grid dd {
+  margin: 0;
+  font-weight: 600;
+}
+.fc-ev-note {
+  margin: 0 0 12px;
+  color: var(--fc-muted);
+  line-height: 1.55;
+}
+.fc-ev-dataset {
+  margin-bottom: 12px;
+}
+.fc-ev-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: #2e5cf6;
+  font-weight: 700;
+  text-decoration: none;
+  word-break: break-word;
+}
+.fc-ev-link:hover {
+  text-decoration: underline;
+}
+.fc-ev-csv {
+  margin: 0;
+  padding: 10px;
+  background: #0f1626;
+  color: #e6ebf5;
+  border-radius: 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  overflow-x: auto;
+  white-space: pre;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+/* ------------------------------------------------------------------ */
+/* Standalone factcheck page shell + compatibility with render.js       */
+/* ------------------------------------------------------------------ */
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: #f4f6fa;
+  color: var(--fc-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  line-height: 1.5;
+}
+
+a {
+  color: #2e5cf6;
+}
+
+.fc-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 22px;
+  border-bottom: 1px solid var(--fc-line);
+  background: var(--fc-panel);
+}
+
+.fc-header h1 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.fc-main {
+  display: grid;
+  grid-template-columns: minmax(0, 430px) minmax(0, 1fr);
+  gap: 18px;
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 18px;
+}
+
+@media (max-width: 900px) {
+  .fc-main {
+    grid-template-columns: 1fr;
+  }
+}
+
+.fc-input-panel,
+.fc-output-panel {
+  border: 1px solid var(--fc-line);
+  border-radius: var(--fc-radius);
+  background: var(--fc-panel);
+  padding: 16px;
+}
+
+.fc-input-panel label {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--fc-muted);
+  font-size: 13px;
+  font-weight: 700;
+}
+
+#article {
+  width: 100%;
+  min-height: 240px;
+  padding: 12px;
+  border: 1px solid var(--fc-line);
+  border-radius: 12px;
+  color: var(--fc-text);
+  font: inherit;
+  resize: vertical;
+}
+
+.fc-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.fc-toggle {
+  display: inline-flex;
+  overflow: hidden;
+  border: 1px solid var(--fc-line);
+  border-radius: 999px;
+}
+
+.fc-toggle button,
+#run {
+  font: inherit;
+  cursor: pointer;
+}
+
+.fc-toggle button {
+  border: 0;
+  background: transparent;
+  padding: 7px 13px;
+  color: var(--fc-muted);
+}
+
+.fc-toggle button.active {
+  background: #1c2433;
+  color: #fff;
+}
+
+#run {
+  border: 0;
+  border-radius: 999px;
+  background: #2e5cf6;
+  color: #fff;
+  padding: 8px 16px;
+  font-weight: 800;
+}
+
+#run:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
+}
+
+.fc-help,
+#status {
+  color: var(--fc-muted);
+  font-size: 12.5px;
+}
+
+#status.err {
+  color: var(--fc-contradicted);
+}
+
+.fc-section-title {
+  margin: 0 0 10px;
+  color: var(--fc-muted);
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.hidden {
+  display: none !important;
+}
+
+/* render.js currently emits these class names. Keep them covered even if
+   the richer Stream-D styles above used alternate names. */
+.fc-article {
+  white-space: pre-wrap;
+  word-break: break-word;
+  line-height: 1.75;
+  color: var(--fc-text);
+}
+
+.fc-parse-card {
+  padding: 12px;
+  border: 1px solid var(--fc-line);
+  border-radius: var(--fc-radius);
+  background: var(--fc-panel);
+}
+
+.fc-parse-statement {
+  margin-top: 6px;
+  color: var(--fc-muted);
+  font-size: 13px;
+}
+
+.fc-tag {
+  font-size: 11px;
+  color: var(--fc-muted);
+  background: #eef1f6;
+  border: 1px solid var(--fc-line);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.fc-dot-verified,
+.fc-dot.fc-dot-verified {
+  background: var(--fc-verified);
+}
+
+.fc-dot-unverified,
+.fc-dot.fc-dot-unverified {
+  background: var(--fc-unverified);
+}
+
+.fc-dot-contradicted,
+.fc-dot.fc-dot-contradicted {
+  background: var(--fc-contradicted);
+}
+
+.fc-dot-pending,
+.fc-dot.fc-dot-pending {
+  background: var(--fc-faint);
+}
+
+#evidence {
+  margin-top: 16px;
+  border: 1px solid var(--fc-line);
+  border-left: 4px solid var(--fc-faint);
+  border-radius: var(--fc-radius);
+  background: var(--fc-panel);
+  padding: 14px;
+  font-size: 13.5px;
+}
