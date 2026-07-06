@@ -1329,6 +1329,13 @@
       }
     }
 
+    class EmptyAnswerError extends Error {
+      constructor() {
+        super("The model returned an empty answer. Try again, or switch modes for this question.");
+        this.name = "EmptyAnswerError";
+      }
+    }
+
     function combineAbortSignals(signals) {
       if (typeof AbortSignal !== "undefined" && AbortSignal.any) return AbortSignal.any(signals);
       const ctrl = new AbortController();
@@ -1405,6 +1412,18 @@
         }
       }
       return full;
+    }
+
+    async function streamOrComplete(messages, temperature, onDelta, maxTokens) {
+      try {
+        const streamed = await orStream(messages, temperature, onDelta, maxTokens);
+        if (String(streamed || "").trim()) return streamed;
+      } catch (err) {
+        if (err instanceof RunStopped) throw err;
+      }
+      const completed = await orComplete(messages, temperature, maxTokens);
+      if (String(completed || "").trim()) onDelta(completed);
+      return completed;
     }
     function formatCost(c) {
       if (c >= 0.01) return `$${c.toFixed(4)}`;
@@ -2249,15 +2268,7 @@
       throwIfRunAborted();
 
       const ANSWER_ASK = P("answer_ask");
-      const answer = async () => {
-        try { return await orStream(messages, 0, onDelta, maxOut); }
-        catch (err) {
-          if (err instanceof RunStopped) throw err;
-          const t = await orComplete(messages, 0, maxOut);
-          onDelta(t);
-          return t;
-        }
-      };
+      const answer = () => streamOrComplete(messages, 0, onDelta, maxOut);
       messages.push({ role: "user", content: ANSWER_ASK });
       let finalText = await answer();
 
@@ -2481,14 +2492,9 @@
         if (result.collected) {
           finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, deep, onDelta, maxOut);
         } else {
-          try {
-            finalText = await orStream(result.messages, 0, onDelta, maxOut);
-          } catch (streamErr) {
-            if (streamErr instanceof RunStopped) throw streamErr;
-            finalText = await orComplete(result.messages, 0, maxOut);
-            renderInto(ui.answer, finalText);
-          }
+          finalText = await streamOrComplete(result.messages, 0, onDelta, maxOut);
         }
+        if (!String(finalText || "").trim()) throw new EmptyAnswerError();
         ui.answer.classList.remove("cursor");
         synthStep.done("answer complete");
 
