@@ -255,6 +255,11 @@
     .msg.bot .av { background: linear-gradient(135deg, #2e5cf6, #192c6d); color: #fff; }
     .msg .body { min-width: 0; flex: 1; }
     .msg .who { font-size: 12px; color: var(--faint); margin: 4px 0 6px; font-weight: 600; letter-spacing: .02em; }
+    .mode-badge {
+      display: inline-flex; align-items: center; margin-left: 6px; padding: 1px 6px;
+      border: 1px solid var(--line); border-radius: 999px; color: var(--muted);
+      font-size: 10px; letter-spacing: .04em; text-transform: uppercase; vertical-align: middle;
+    }
     .msg.user .text {
       background: #f5f8ff; border: 1px solid #dbe4ff;
       border-radius: 14px; padding: 12px 14px; line-height: 1.55; white-space: pre-wrap;
@@ -569,8 +574,8 @@
 
     <div class="composer-wrap">
       <div class="composer-tools">
-        <span class="chat-mode-note">Mode for this chat</span>
-        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for this chat" title="Mode for this chat">
+        <span class="chat-mode-note">Mode for next answer</span>
+        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for next answer" title="Mode for next answer">
           <button type="button" data-mode="fast" class="active">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
             Fast
@@ -589,7 +594,7 @@
           </svg>
         </button>
       </div>
-      <div class="composer-hint">Enter to send · Shift+Enter for newline · Fast/Deep is saved per chat · Key &amp; model live in Settings (top-right)</div>
+      <div class="composer-hint">Enter to send · Shift+Enter for newline · Switch Fast/Deep anytime before sending · Key &amp; model live in Settings (top-right)</div>
       <div class="composer-disclaimer">Prototype · not an official NDAP, NITI Aayog, or Government of India product. Verify figures before relying on them.</div>
     </div>
   </div>
@@ -762,6 +767,9 @@
     function resolveTurnModel(turn, chat) {
       return (turn && turn.model) || chat.model || settings.model || DEFAULT_MODEL;
     }
+    function resolveTurnMode(turn, chat) {
+      return (turn && turn.mode) || chat.mode || "fast";
+    }
 
     function exportProvenance(chat, turn) {
       const exportedAtMs = Date.now();
@@ -769,6 +777,9 @@
       const modelsUsed = turn
         ? [model]
         : [...new Set(chat.transcript.map((t) => resolveTurnModel(t, chat)))];
+      const modesUsed = turn
+        ? [resolveTurnMode(turn, chat)]
+        : [...new Set(chat.transcript.map((t) => resolveTurnMode(t, chat)))];
       return {
         title: turn ? titleFromQuestion(turn.q) : (chat.title || "NDAP Research Chat"),
         author: EXPORT_META.author,
@@ -777,7 +788,8 @@
         appUrl: EXPORT_META.appUrl,
         repoUrl: EXPORT_META.repoUrl,
         chatId: chat.id,
-        mode: chat.mode || "fast",
+        mode: turn ? resolveTurnMode(turn, chat) : (modesUsed.length === 1 ? modesUsed[0] : "mixed"),
+        modesUsed,
         model,
         modelsUsed,
         modelUrl: openRouterModelUrl(model),
@@ -805,6 +817,7 @@
         `model_url: ${prov.modelUrl}`,
       ];
       if (prov.answeredAt) lines.push(`answered_at: ${prov.answeredAt}`);
+      if (prov.modesUsed.length > 1) lines.push(`modes_used: ${JSON.stringify(prov.modesUsed)}`);
       if (prov.modelsUsed.length > 1) lines.push(`models_used: ${JSON.stringify(prov.modelsUsed)}`);
       lines.push("---");
       return lines.join("\n");
@@ -929,6 +942,7 @@
         transcript: chat.transcript.map((t) => ({
           q: t.q,
           a: t.a,
+          mode: resolveTurnMode(t, chat),
           model: resolveTurnModel(t, chat),
           modelUrl: openRouterModelUrl(resolveTurnModel(t, chat)),
           answeredAt: t.answeredAt ? isoStamp(t.answeredAt) : null,
@@ -1390,21 +1404,23 @@
       let out = "";
       for (const t of recent) {
         const ds = t.dataset ? ` [used dataset ${t.dataset}]` : "";
-        const line = `Q: ${t.q}${ds}\nA: ${t.answer}\n\n`;
+        const mode = t.mode ? ` [${t.mode} mode]` : "";
+        const line = `Q${mode}: ${t.q}${ds}\nA: ${t.answer}\n\n`;
         if (out.length + line.length > MAX_HISTORY_CHARS) break;
         out += line;
       }
       return out.trim();
     }
 
-    function rememberTurn(question, datasetLabel, answer) {
+    function rememberTurn(question, datasetLabel, answer, mode) {
       const cc = currentChat();
       if (!cc) return;
       const full = (answer || "").trim();
       const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
-      cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed });
+      const turnMode = mode === "deep" ? "deep" : "fast";
+      cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed, mode: turnMode });
       if (cc.convo.length > MAX_TURNS * 2) cc.convo = cc.convo.slice(-MAX_TURNS * 2);
-      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), model: settings.model, answeredAt: Date.now() });
+      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), mode: turnMode, model: settings.model, answeredAt: Date.now() });
       if (cc.transcript.length > MAX_SAVED_TURNS) cc.transcript = cc.transcript.slice(-MAX_SAVED_TURNS);
       cc.model = settings.model;
       convo = cc.convo; transcript = cc.transcript;
@@ -1527,7 +1543,7 @@
         return;
       }
       thread.innerHTML = "";
-      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.q, t.a); }
+      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.q, t.a, resolveTurnMode(t, cc)); }
       scrollDown();
     }
 
@@ -1585,11 +1601,19 @@
     function closeSidebar() { $("sidebar").classList.remove("open"); $("sidebarBackdrop").classList.remove("open"); }
     function toggleSidebar() { $("sidebar").classList.contains("open") ? closeSidebar() : openSidebar(); }
 
-    function addRestoredAnswer(question, markdownText) {
+    function modeLabel(mode) {
+      return mode === "deep" ? "Deep" : "Fast";
+    }
+
+    function agentWho(mode) {
+      return `Agent <span class="mode-badge">${modeLabel(mode)}</span>`;
+    }
+
+    function addRestoredAnswer(question, markdownText, mode = "fast") {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
       const body = el("div", "body");
-      body.appendChild(el("div", "who", "Agent"));
+      body.appendChild(el("div", "who", agentWho(mode)));
       const answer = el("div", "answer");
       renderInto(answer, markdownText || "");
       answer.appendChild(createAnswerTools(question, markdownText));
@@ -2013,11 +2037,11 @@
       scrollDown();
     }
 
-    function addAssistant() {
+    function addAssistant(mode = "fast") {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
       const body = el("div", "body");
-      body.appendChild(el("div", "who", "Agent"));
+      body.appendChild(el("div", "who", agentWho(mode)));
 
       // Process block (thinking) — open while running
       const proc = el("details", "block"); proc.open = true;
@@ -2338,15 +2362,16 @@
       resetUsage();
       try { await loadPrompts(); } catch (_) { /* boot load usually has it; metadata/data prompts degrade to empty if truly missing */ }
       input.value = ""; input.style.height = "auto";
+      const modeUsed = chatMode();
+      const deep = modeUsed === "deep";
       addUser(question);
-      const ui = addAssistant();
+      const ui = addAssistant(modeUsed);
 
       // surface this chat in the sidebar right away (title from first question)
       const cc0 = currentChat();
       if (cc0 && !cc0.title) { cc0.title = titleFromQuestion(question); cc0.updatedAt = Date.now(); saveChats(); renderChatList(); }
 
       const history = compressedHistory();
-      const deep = chatMode() === "deep";
       ui.procMeta.textContent = deep ? "deep research…" : "working…";
       let usedDataset = "";
       try {
@@ -2359,7 +2384,7 @@
           ui.procMeta.textContent = "done";
           ui.proc.open = false;
           ui.answer.innerHTML = `<div class="err">No matching NDAP datasets in the local index. Try broader or different terms.</div>`;
-          rememberTurn(question, "", "No matching datasets found.");
+          rememberTurn(question, "", "No matching datasets found.", modeUsed);
           return;
         }
         usedDataset = result.usedDataset || "";
@@ -2386,7 +2411,7 @@
         ui.procMeta.textContent = "done";
         ui.proc.open = false;
 
-        rememberTurn(question, usedDataset, finalText);
+        rememberTurn(question, usedDataset, finalText, modeUsed);
 
         ui.answer.appendChild(createAnswerTools(question, finalText));
       } catch (e) {
