@@ -120,13 +120,15 @@ Each chat starts with a **Depth** choice (`Fast` or `Deep`) and a **Personality*
 - **Objective** — concise, sober, answer-first writing.
 - **Judgemental** — the investigative data-journalist persona: it follows the user's requested format and can make judgement calls, correlations, gap calls, skepticism, and forecasts when the supplied NDAP evidence supports them. Answers are opinionated in analysis but never creative with the numbers.
 
+Personality only changes the answer's voice and temperature — it no longer selects a different model. The Large model always writes the final answer; the Small model always drives search, planning, dataset selection, and the browser-local tool loop.
+
 While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast depth stops after 2 minutes; Deep depth stops after 5 minutes, with a timeout note instead of hanging indefinitely.
 
 Open Settings (gear icon, top-right) and enter:
 
 - your OpenRouter API key (stored only in your browser's localStorage, sent directly to OpenRouter),
-- an Objective OpenRouter model slug such as `openai/gpt-5.4-nano`,
-- a Judgemental OpenRouter model slug such as `anthropic/claude-sonnet-4.6`,
+- a **Small model** slug (does search, planning, dataset selection, and the browser-local tool loop; cheap/fast is fine) such as `openai/gpt-5.4-nano`,
+- a **Large model** slug (writes every final answer; use a stronger model) such as `anthropic/claude-sonnet-4.6`,
 - optionally, a Data proxy URL to enable real numbers (see below),
 - **Max datasets to search** — how many candidate datasets the index search surfaces for the model to choose from (default `100`; applies to both modes),
 - **Deep depth: datasets to analyze** — how many datasets Deep will download and analyze per run (default `3`).
@@ -169,21 +171,33 @@ To make the demo **compute real numbers** in the browser, you need two things:
    Worker is stateless, stores nothing, and only forwards to `loadqa.ndapapi.com`.
 
 In real-numbers mode the agent fetches rows for the selected dataset(s)
-(paginated, capped), hands the most relevant rows to the model as CSV, and the
-model computes the answer with the actual values. Fast mode uses one dataset;
-Deep mode may download several and combine them. The numbers reflect the
-breakdown encoded in the stored recipe (e.g. national/by-dimension); if a
-requested entity isn't in those rows, the model is instructed to say so.
+(paginated, capped) and then drives a **native tool-calling loop** to reach the
+answer with the actual values. For each downloaded dataset the model receives a
+small **preview** of the rows plus a **data profile** — each filterable
+dimension and its distinct values — and works from there. Fast mode starts from
+the top matching dataset, but the loop may pull in more within its budgets; Deep
+mode reads several and combines them. The numbers reflect the breakdown actually
+present in the fetched rows; if a requested entity isn't there, the model is
+instructed to say so.
 
-For large datasets only a capped sample of the most-relevant rows is shown to
-the model first, but the full set of fetched rows is kept in memory. Alongside
-the sample the model also gets a **data profile** (each filterable dimension and
-its distinct values) and can **request more rows on demand** — by filtering on
-specific dimension values (e.g. a pre-aggregated total / national row, a
-particular state, city, or year) or asking for the next batch. Each request is satisfied by
-re-slicing the in-memory rows (no extra network calls), bounded to a few rounds.
-This lets the agent reach rows that keyword relevance alone would miss instead of
-guessing or wrongly aggregating a partial sample.
+From the preview and profile the model drives a bounded set of **browser-local
+tools** via native tool-calling:
+
+- `search_datasets` / `inspect_dataset` / `download_dataset` — find and pull
+  additional datasets.
+- `preview_more` / `filter_rows` / `search_rows` — reach more rows by paging,
+  filtering on specific dimension values (e.g. a national/total row, a
+  particular state, city, or year), or searching text.
+- `profile_column` — list the distinct values of a column.
+- `compute_aggregate` — sum / avg / min / max / count, optionally with a
+  group-by, computed over the rows.
+
+Most row tools re-slice data that's already been downloaded into memory, but
+`download_dataset` fetches through the proxy, so the loop can make additional
+network calls when it needs a new dataset. The whole loop is bounded by per-run
+step, row, and download budgets. This lets the agent reach rows and rollups that
+keyword relevance alone would miss instead of guessing or wrongly aggregating a
+partial sample.
 
 ### Conversations and multi-turn memory
 

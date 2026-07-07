@@ -50,6 +50,79 @@ MAX_DRILL_ITERS = MAX_AGENT_STEPS
 DRILL_ROWS = 500
 PROFILE_VALUES_CAP = 40
 
+# Native OpenRouter/OpenAI function tools — mirrors AGENT_TOOLS in docs/index.html (contract C4).
+AGENT_TOOLS = [
+    {"type": "function", "function": {
+        "name": "search_datasets",
+        "description": "Search the NDAP metadata index by literal keywords.",
+        "parameters": {"type": "object", "properties": {
+            "query": {"type": "string"},
+            "limit": {"type": "integer"},
+            "reason": {"type": "string"},
+        }, "required": ["query"]}}},
+    {"type": "function", "function": {
+        "name": "inspect_dataset",
+        "description": "Inspect a dataset's metadata (name, description, dimensions, coverage).",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset"]}}},
+    {"type": "function", "function": {
+        "name": "download_dataset",
+        "description": "Download a dataset so its rows can be queried.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset"]}}},
+    {"type": "function", "function": {
+        "name": "preview_more",
+        "description": "Return more rows from a downloaded dataset.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "offset": {"type": "integer"},
+            "limit": {"type": "integer"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset"]}}},
+    {"type": "function", "function": {
+        "name": "filter_rows",
+        "description": "Filter rows of a downloaded dataset by column-value constraints.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "where": {"type": "object", "additionalProperties": True},
+            "limit": {"type": "integer"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset"]}}},
+    {"type": "function", "function": {
+        "name": "search_rows",
+        "description": "Keyword-search rows of a downloaded dataset, optionally scoped to columns.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "query": {"type": "string"},
+            "columns": {"type": "array", "items": {"type": "string"}},
+            "limit": {"type": "integer"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset", "query"]}}},
+    {"type": "function", "function": {
+        "name": "profile_column",
+        "description": "List the distinct values of a column in a downloaded dataset.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "column": {"type": "string"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset", "column"]}}},
+    {"type": "function", "function": {
+        "name": "compute_aggregate",
+        "description": "Aggregate rows of a downloaded dataset (group_by + metrics) for arithmetic.",
+        "parameters": {"type": "object", "properties": {
+            "dataset": {"type": "string"},
+            "where": {"type": "object", "additionalProperties": True},
+            "group_by": {"type": "array", "items": {"type": "string"}},
+            "metrics": {"type": "array", "items": {"type": "object", "additionalProperties": True}},
+            "limit": {"type": "integer"},
+            "reason": {"type": "string"},
+        }, "required": ["dataset"]}}},
+]
+
 INDEX = json.loads((DOCS / "assets/ndap_index.json").read_text())
 RECIPES = json.loads((DOCS / "assets/ndap_recipes.json").read_text())
 # Single source of truth for prompts — shared verbatim with docs/index.html.
@@ -122,6 +195,26 @@ def chat(model: str, messages: list, temperature: float = 0, max_tokens: int = 2
     )
     d = json.load(urllib.request.urlopen(req, timeout=180))
     return d["choices"][0]["message"]["content"]
+
+
+def chat_tools(model: str, messages: list, tools: list, temperature: float = 0, max_tokens: int = 700) -> dict:
+    """Native tool-calling turn. Returns the full assistant message dict
+    (d["choices"][0]["message"]), which may contain "content" and/or "tool_calls"."""
+    body = json.dumps({
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tools": tools,
+        "tool_choice": "auto",
+    }).encode()
+    req = urllib.request.Request(
+        "https://openrouter.ai/api/v1/chat/completions",
+        data=body,
+        headers={"Authorization": f"Bearer {KEY}", "Content-Type": "application/json"},
+    )
+    d = json.load(urllib.request.urlopen(req, timeout=180))
+    return d["choices"][0]["message"]
 
 
 def extract_json(text: str):
@@ -497,6 +590,16 @@ def parse_agent_action(text):
     return None
 
 
+def tool_call_to_action(tc):
+    try:
+        args = json.loads(tc["function"].get("arguments") or "{}")
+        if not isinstance(args, dict):
+            args = {}
+    except Exception:
+        args = {}
+    return {"tool": tc["function"]["name"], **args}
+
+
 def data_initial_messages(question, collected, mode, personality):
     judgemental = normalize_personality(personality) == "judgemental"
     sys = P("judgemental_sys") if judgemental else (P("data_sys_multi") if normalize_mode(mode) == "deep" else P("data_sys_single"))
@@ -567,34 +670,29 @@ def synthesize_with_drilldown(model, question, collected, mode, personality):
     messages = data_initial_messages(question, collected, mode, personality)
     drills = []
     state = {"downloads": len(collected), "rows_returned": sum(len(c["used"]) for c in collected)}
-    ask = P("agentic_data_ask") or P("drill_ask")
     for _ in range(MAX_AGENT_STEPS):
-        messages.append({"role": "user", "content": ask})
-        resp = chat(model, messages, 0, 700)
-        action = parse_agent_action(resp)
-        if not action or str(action.get("tool", "")).lower() in {"ready", "answer", "final_answer"}:
-            messages.pop()
-            break
-        messages.append({"role": "assistant", "content": resp})
-        obs = execute_agent_action(action, collected, state)
-        drills.append({k: v for k, v in obs.items() if k != "observation"})
-        messages.append({"role": "user", "content": obs["observation"]})
+        msg = chat_tools(model, messages, AGENT_TOOLS)
+        calls = msg.get("tool_calls") or []
+        if not calls:  # no native tool call
+            stray = parse_agent_action(msg.get("content"))  # weak-model fallback
+            if not stray:  # model is done gathering
+                break
+            messages.append({"role": "assistant", "content": msg.get("content") or ""})
+            obs = execute_agent_action(stray, collected, state)
+            drills.append({k: v for k, v in obs.items() if k != "observation"})
+            messages.append({"role": "user", "content": obs["observation"]})
+            continue
+        messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
+        for tc in calls:
+            obs = execute_agent_action(tool_call_to_action(tc), collected, state)
+            drills.append({k: v for k, v in obs.items() if k != "observation"})
+            messages.append({"role": "tool", "tool_call_id": tc["id"], "content": obs["observation"]})
     judgemental = normalize_personality(personality) == "judgemental"
     answer_ask = P("judgemental_answer_ask") if judgemental else P("answer_ask")
     answer_temp = 0.2 if judgemental else 0
     answer_max = 3000
     messages.append({"role": "user", "content": answer_ask})
     final = chat(model, messages, answer_temp, answer_max)
-    stray = parse_agent_action(final)
-    for _ in range(3):
-        if not stray:
-            break
-        obs = execute_agent_action(stray, collected, state)
-        drills.append({k: v for k, v in obs.items() if k != "observation"} | {"phase": "final"})
-        messages.append({"role": "assistant", "content": final})
-        messages.append({"role": "user", "content": f"{obs['observation']}\n\n{answer_ask}"})
-        final = chat(model, messages, answer_temp, answer_max)
-        stray = parse_agent_action(final)
     return final, drills
 
 
