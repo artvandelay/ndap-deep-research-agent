@@ -15,10 +15,10 @@ The project is designed for deep-research agents that need to discover relevant 
 - A committed SQLite metadata index for NDAP datasets, indicators, and dimensions at `data/index.db`.
 - FTS5 search over dataset names, notes, indicators, dimensions, and enrichment text.
 - An MCP server with tools for dataset search, metadata lookup, sector/ministry listing, and on-demand downloads.
-- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each chat starts in one locked mode chosen from the **Fast / Deep / Scoop** toggle, and shows a visible agent trace. Long runs can be stopped from the composer and have mode-specific wall-clock ceilings. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
+- A static GitHub Pages chat demo for OpenRouter-powered agentic dataset search, with an optional CORS-proxy mode that downloads rows and computes real numbers in the browser. Each chat starts with two locked choices — **Depth** (`Fast` / `Deep`) and **Personality** (`Objective` / `Judgemental`) — and shows a visible agent trace. Long runs can be stopped from the composer and have depth-specific wall-clock ceilings. It also includes a multi-conversation sidebar with saved chat history and per-query cost/token accounting.
   - **Fast**: a single pass — plan one search → retrieve candidates → pick the single best dataset → (optionally) download it → synthesize.
   - **Deep**: a bounded research loop — decompose the question into several search angles → gather a candidate pool → select and download multiple datasets → reflect on coverage and search again to fill gaps → synthesize across all sources.
-  - **Scoop**: the Deep evidence loop with a data-journalist voice — it hunts across datasets for the story, writes a headline and bold lede, then adds a labeled "The Take" section for opinions and forecasts derived from the cited rows. Every figure is still NDAP-only.
+  - **Judgemental**: a sharper personality layer — it keeps the selected evidence depth, then makes evidence-grounded calls on patterns, correlations, gaps, caveats, skepticism, and forecasts. Every figure is still NDAP-only.
 - Utilities to harvest NDAP metadata, rebuild the index, and download raw dataset rows as CSV.
 
 ## Repository Layout
@@ -113,21 +113,23 @@ https://artvandelay.github.io/ndap-deep-research-agent/
 
 It is a simplified, Hermes-inspired chat interface. It does not embed the full dataset catalogue into the prompt. Instead, it searches a browser-friendly metadata export generated from `data/index.db` and grounds the answer in the matching records (and, in real-numbers mode, their downloaded rows).
 
-Each chat starts in **Fast**, **Deep**, or **Scoop**, chosen with the toggle before the first message. The mode then locks for that conversation, and each turn records the mode used:
+Each chat starts with a **Depth** choice (`Fast` or `Deep`) and a **Personality** choice (`Objective` or `Judgemental`), chosen before the first message. Both choices then lock for that conversation, and each turn records the depth, personality, and model used:
 
 - **Fast** — one model-planned search → retrieve candidates → pick the single best dataset → (real-numbers mode) download it → synthesize a grounded answer. Lowest latency and cost.
 - **Deep** — the model decomposes the question into several search angles, gathers a wider candidate pool, then selects and downloads multiple datasets, reflecting between rounds to fill gaps before synthesizing across all of them. Better for questions that need to combine datasets (e.g. rainfall × crop production), at higher latency and cost.
-- **Scoop** — the Deep evidence loop with an investigative data-journalist persona: it searches across datasets for the story, opens with an H3 headline and bold lede, tells the case through real NDAP numbers, then adds a "The Take" section whose bullets are labeled *Opinion* or *Forecast* and derived from the cited rows. Same deeper latency profile and 5-minute ceiling as Deep; answers are creative in tone but never in the numbers.
+- **Objective** — concise, sober, answer-first writing.
+- **Judgemental** — the investigative data-journalist persona: it follows the user's requested format and can make judgement calls, correlations, gap calls, skepticism, and forecasts when the supplied NDAP evidence supports them. Answers are opinionated in analysis but never creative with the numbers.
 
-While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast stops after 2 minutes; Deep and Scoop stop after 5 minutes, with a timeout note instead of hanging indefinitely.
+While an answer is running, the Send button becomes **Stop**. Stopping cancels the active model/data request, leaves any partial streamed answer visible, and avoids saving the interrupted turn. Runs also have overall wall-clock ceilings: Fast depth stops after 2 minutes; Deep depth stops after 5 minutes, with a timeout note instead of hanging indefinitely.
 
 Open Settings (gear icon, top-right) and enter:
 
 - your OpenRouter API key (stored only in your browser's localStorage, sent directly to OpenRouter),
-- an OpenRouter model slug such as `openai/gpt-5.4-nano`, `anthropic/claude-sonnet-4.6`, or another model on your account,
+- an Objective OpenRouter model slug such as `openai/gpt-5.4-nano`,
+- a Judgemental OpenRouter model slug such as `anthropic/claude-sonnet-4.6`,
 - optionally, a Data proxy URL to enable real numbers (see below),
 - **Max datasets to search** — how many candidate datasets the index search surfaces for the model to choose from (default `100`; applies to both modes),
-- **Deep mode: datasets to analyze** — how many datasets Deep mode will download and analyze per run (default `3`).
+- **Deep depth: datasets to analyze** — how many datasets Deep will download and analyze per run (default `3`).
 
 Example prompts:
 

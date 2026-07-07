@@ -119,7 +119,7 @@
     .pill.ok .dot { background: var(--green); box-shadow: 0 0 10px rgba(31,157,87,.5); }
     .pill.warn .dot { background: #e8a33d; box-shadow: 0 0 10px rgba(232,163,61,.5); }
 
-    /* Fast / Deep / Scoop mode toggle (per chat) */
+    /* Depth/personality toggles (per chat) */
     .mode-toggle {
       display: inline-flex; align-items: center; gap: 2px; flex: 0 0 auto;
       background: #eef1f6; border: 1px solid var(--line); border-radius: 999px; padding: 3px;
@@ -133,7 +133,7 @@
     .mode-toggle button:hover { color: var(--navy); }
     .mode-toggle button.active { background: #fff; color: var(--navy); box-shadow: 0 1px 3px rgba(25,44,109,.12); }
     .mode-toggle button[data-mode="deep"].active { color: var(--blue); }
-    .mode-toggle button[data-mode="scoop"].active { color: #e8590c; }
+    .mode-toggle button[data-personality="judgemental"].active { color: #e8590c; }
     .mode-toggle button:disabled { cursor: not-allowed; opacity: .55; }
 
     .icon-btn {
@@ -393,10 +393,15 @@
     }
     .composer-tools {
       max-width: 860px; margin: 0 auto 8px;
-      display: flex; align-items: center; justify-content: flex-end; gap: 10px;
+      display: grid; grid-template-columns: auto auto; align-items: center; justify-content: flex-end; gap: 6px 10px;
       color: var(--faint); font-size: 11.5px;
     }
+    .composer-tools .mode-toggle { justify-self: end; }
     .chat-mode-note {
+      letter-spacing: .01em;
+      white-space: nowrap;
+    }
+    .chat-personality-note {
       letter-spacing: .01em;
       white-space: nowrap;
     }
@@ -481,7 +486,7 @@
     @media (max-width: 640px) {
       .thread { padding: 18px 14px 30px; }
       .composer-wrap { padding: 12px 14px; }
-      .composer-tools { justify-content: space-between; }
+      .composer-tools { grid-template-columns: 1fr auto; justify-content: stretch; }
     }
   </style>
 </head>
@@ -556,7 +561,7 @@
               </div>
               <div class="mode-line">
                 <span class="mode-ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg></span>
-                <span><strong>Scoop</strong> investigates across datasets like Deep, then writes the story in a sharp, opinionated voice.</span>
+                <span><strong>Judgemental</strong> keeps the same evidence depth you choose, then makes sharper evidence-grounded calls on patterns, correlations, gaps, and what the data is really saying.</span>
               </div>
             </div>
           </div>
@@ -584,8 +589,8 @@
 
     <div class="composer-wrap">
       <div class="composer-tools">
-        <span class="chat-mode-note">Choose mode for this chat</span>
-        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research mode for this chat" title="Choose mode for this chat">
+        <span class="chat-mode-note">Depth</span>
+        <div class="mode-toggle" id="modeToggle" role="group" aria-label="Research depth for this chat" title="Choose research depth for this chat">
           <button type="button" data-mode="fast" class="active">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 3 14h7l-1 8 10-12h-7l1-8z"/></svg>
             Fast
@@ -594,9 +599,16 @@
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
             Deep
           </button>
-          <button type="button" data-mode="scoop">
+        </div>
+        <span class="chat-personality-note">Personality</span>
+        <div class="mode-toggle" id="personalityToggle" role="group" aria-label="Answer personality for this chat" title="Choose answer personality for this chat">
+          <button type="button" data-personality="objective" class="active">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19h16"/><path d="M8 17V7"/><path d="M16 17V7"/><path d="M12 17V4"/></svg>
+            Objective
+          </button>
+          <button type="button" data-personality="judgemental">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/></svg>
-            Scoop
+            Judgemental
           </button>
         </div>
       </div>
@@ -608,7 +620,7 @@
           </svg>
         </button>
       </div>
-      <div class="composer-hint">Enter to send · Shift+Enter for newline · Pick Fast / Deep / Scoop before the first message — the mode then locks for this chat · Key &amp; model live in Settings (top-right)</div>
+      <div class="composer-hint">Enter to send · Shift+Enter for newline · Pick Fast/Deep and Objective/Judgemental before the first message — both lock for this chat · Key &amp; models live in Settings (top-right)</div>
       <div class="composer-disclaimer">Prototype · not an official NDAP, NITI Aayog, or Government of India product. Verify figures before relying on them.</div>
     </div>
   </div>
@@ -633,11 +645,17 @@
       </div>
       <p class="help">Stored only in this browser (localStorage) and sent directly to OpenRouter from your device. Never uploaded anywhere else.</p>
 
-      <label for="modelInput">Model slug</label>
+      <label for="objectiveModelInput">Objective model slug</label>
       <div class="field">
-        <input id="modelInput" placeholder="openai/gpt-5.4-nano" autocomplete="off" spellcheck="false" />
+        <input id="objectiveModelInput" placeholder="openai/gpt-5.4-nano" autocomplete="off" spellcheck="false" />
       </div>
-      <p class="help">Any OpenRouter model, e.g. <code>openai/gpt-5.4-nano</code>, <code>anthropic/claude-sonnet-4.6</code>, <code>moonshotai/kimi-k2.7</code>.</p>
+      <p class="help">Used when the chat personality is Objective. Cheap models are fine here, e.g. <code>openai/gpt-5.4-nano</code>.</p>
+
+      <label for="judgementalModelInput">Judgemental model slug</label>
+      <div class="field">
+        <input id="judgementalModelInput" placeholder="anthropic/claude-sonnet-4.6" autocomplete="off" spellcheck="false" />
+      </div>
+      <p class="help">Used when the chat personality is Judgemental. Sonnet-class models usually give better reasoning and voice, e.g. <code>anthropic/claude-sonnet-4.6</code>.</p>
 
       <label for="proxyInput">Data proxy URL <span style="color:var(--faint);font-weight:500">(optional)</span></label>
       <div class="field">
@@ -649,13 +667,13 @@
       <div class="field">
         <input id="searchMaxInput" type="number" min="10" max="500" placeholder="100" />
       </div>
-      <p class="help">How many candidate datasets the index search surfaces for the model to choose from (applies to Fast, Deep, and Scoop). Higher = broader recall, more tokens.</p>
+      <p class="help">How many candidate datasets the index search surfaces for the model to choose from (applies to both Fast and Deep depth). Higher = broader recall, more tokens.</p>
 
-      <label for="deepDownloadsInput">Deep/Scoop mode: datasets to analyze</label>
+      <label for="deepDownloadsInput">Deep depth: datasets to analyze</label>
       <div class="field">
         <input id="deepDownloadsInput" type="number" min="1" max="8" placeholder="3" />
       </div>
-      <p class="help">In Deep and Scoop modes the agent downloads and analyzes up to this many datasets (real-numbers mode), reflecting between rounds to fill gaps. Higher = more thorough but slower and costlier.</p>
+      <p class="help">In Deep depth the agent downloads and analyzes up to this many datasets (real-numbers mode), reflecting between rounds to fill gaps. Higher = more thorough but slower and costlier.</p>
 
       <div class="actions">
         <button id="saveSettings" class="btn-primary">Save</button>
@@ -667,11 +685,13 @@
 
   <script>
     const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-    const LS = { key: "ndap.or.key", model: "ndap.or.model", searchMax: "ndap.or.searchmax", deepDownloads: "ndap.or.deepdl", proxy: "ndap.proxy", history: "ndap.history", chats: "ndap.chats" };
+    const LS = { key: "ndap.or.key", model: "ndap.or.model", objectiveModel: "ndap.or.model.objective", judgementalModel: "ndap.or.model.judgemental", searchMax: "ndap.or.searchmax", deepDownloads: "ndap.or.deepdl", proxy: "ndap.proxy", history: "ndap.history", chats: "ndap.chats" };
     const MAX_SAVED_TURNS = 40;        // how many Q&A pairs to keep per chat on disk
     const MAX_SAVED_ANSWER_CHARS = 12000;
     const MAX_CHATS = 50;              // how many conversations to keep
     const DEFAULT_MODEL = "openai/gpt-5.4-nano";
+    const DEFAULT_OBJECTIVE_MODEL = DEFAULT_MODEL;
+    const DEFAULT_JUDGEMENTAL_MODEL = "anthropic/claude-sonnet-4.6";
     const DEFAULT_PROXY = "https://ndap-cors-proxy.ndap-deep-research-agent.workers.dev";
     const MAX_PAGES = 8;          // hard cap on openapi pages fetched per dataset
     const PAGE_SIZE = 1000;       // NDAP openapi page size
@@ -695,8 +715,8 @@
     const SRC_DISPLAY_CAP = 30;       // candidates rendered in the Sources panel
     const RUN_DEADLINE_FAST_MS = 120000; // overall wall-clock ceiling per Fast run
     const RUN_DEADLINE_DEEP_MS = 300000;  // overall wall-clock ceiling per Deep run
-    const SCOOP_TEMPERATURE = 0.9;    // final-answer temperature for Scoop mode
-    const SCOOP_MAX_OUT = 3000;       // deeper investigative answer budget for Scoop mode
+    const JUDGEMENTAL_TEMPERATURE = 0.2; // low temp — the judgemental prompt carries the voice; keeps numbers grounded on cheap models
+    const JUDGEMENTAL_MAX_OUT = 3000;    // investigative answer budget for Judgemental personality
 
     const $ = (id) => document.getElementById(id);
     let ndapIndex = null;
@@ -704,6 +724,7 @@
     let ndapPrompts = null;       // single source of truth for prompts (assets/prompts.json)
     let busy = false;
     let runAbort = null;          // { controller, reason, deadlineMs } for the active run
+    let activeRunModel = null;    // selected model for the currently running answer
     let chats = [];               // all conversations [{id,title,createdAt,updatedAt,convo,transcript}]
     let currentChatId = null;
     let convo = [];               // compressed multi-turn memory of current chat (model context)
@@ -711,7 +732,9 @@
 
     const settings = {
       get key() { return localStorage.getItem(LS.key) || ""; },
-      get model() { return localStorage.getItem(LS.model) || DEFAULT_MODEL; },
+      get objectiveModel() { return localStorage.getItem(LS.objectiveModel) || localStorage.getItem(LS.model) || DEFAULT_OBJECTIVE_MODEL; },
+      get judgementalModel() { return localStorage.getItem(LS.judgementalModel) || DEFAULT_JUDGEMENTAL_MODEL; },
+      get model() { return this.objectiveModel; },
       get searchMax() { return Math.max(10, Math.min(500, Number(localStorage.getItem(LS.searchMax) || DEFAULT_SEARCH_MAX))); },
       get deepDownloads() { return Math.max(1, Math.min(8, Number(localStorage.getItem(LS.deepDownloads) || DEFAULT_DEEP_DOWNLOADS))); },
       get proxy() {
@@ -779,26 +802,36 @@
     }
 
     function openRouterModelUrl(modelId) {
-      const id = String(modelId || settings.model || DEFAULT_MODEL).trim().replace(/^\/+/, "");
+      const id = String(modelId || settings.objectiveModel || DEFAULT_OBJECTIVE_MODEL).trim().replace(/^\/+/, "");
       return `https://openrouter.ai/${id}`;
     }
 
+    function modelForPersonality(personality) {
+      return normalizePersonality(personality) === "judgemental" ? settings.judgementalModel : settings.objectiveModel;
+    }
+
     function resolveTurnModel(turn, chat) {
-      return (turn && turn.model) || chat.model || settings.model || DEFAULT_MODEL;
+      return (turn && turn.model) || chat.model || modelForPersonality(resolveTurnPersonality(turn, chat));
     }
     function resolveTurnMode(turn, chat) {
-      return (turn && turn.mode) || chat.mode || "fast";
+      return normalizeMode((turn && turn.mode) || chat.mode || "fast");
+    }
+    function resolveTurnPersonality(turn, chat) {
+      return normalizePersonality((turn && turn.personality) || chat.personality || "objective");
     }
 
     function exportProvenance(chat, turn) {
       const exportedAtMs = Date.now();
-      const model = turn ? resolveTurnModel(turn, chat) : (chat.model || settings.model || DEFAULT_MODEL);
+      const model = turn ? resolveTurnModel(turn, chat) : (chat.model || modelForPersonality(chat.personality));
       const modelsUsed = turn
         ? [model]
         : [...new Set(chat.transcript.map((t) => resolveTurnModel(t, chat)))];
       const modesUsed = turn
         ? [resolveTurnMode(turn, chat)]
         : [...new Set(chat.transcript.map((t) => resolveTurnMode(t, chat)))];
+      const personalitiesUsed = turn
+        ? [resolveTurnPersonality(turn, chat)]
+        : [...new Set(chat.transcript.map((t) => resolveTurnPersonality(t, chat)))];
       return {
         title: turn ? titleFromQuestion(turn.q) : (chat.title || "NDAP Research Chat"),
         author: EXPORT_META.author,
@@ -809,6 +842,8 @@
         chatId: chat.id,
         mode: turn ? resolveTurnMode(turn, chat) : (modesUsed.length === 1 ? modesUsed[0] : "mixed"),
         modesUsed,
+        personality: turn ? resolveTurnPersonality(turn, chat) : (personalitiesUsed.length === 1 ? personalitiesUsed[0] : "mixed"),
+        personalitiesUsed,
         model,
         modelsUsed,
         modelUrl: openRouterModelUrl(model),
@@ -832,11 +867,13 @@
         `chat_created_at: ${prov.createdAt}`,
         `chat_updated_at: ${prov.updatedAt}`,
         `mode: ${prov.mode}`,
+        `personality: ${prov.personality}`,
         `model: ${prov.model}`,
         `model_url: ${prov.modelUrl}`,
       ];
       if (prov.answeredAt) lines.push(`answered_at: ${prov.answeredAt}`);
       if (prov.modesUsed.length > 1) lines.push(`modes_used: ${JSON.stringify(prov.modesUsed)}`);
+      if (prov.personalitiesUsed.length > 1) lines.push(`personalities_used: ${JSON.stringify(prov.personalitiesUsed)}`);
       if (prov.modelsUsed.length > 1) lines.push(`models_used: ${JSON.stringify(prov.modelsUsed)}`);
       lines.push("---");
       return lines.join("\n");
@@ -859,7 +896,8 @@
         `| Exported | ${prov.exportedAt} |`,
         `| Chat created | ${prov.createdAt} |`,
         `| Chat updated | ${prov.updatedAt} |`,
-        `| Research mode | ${prov.mode} |`,
+        `| Research depth | ${prov.mode} |`,
+        `| Personality | ${prov.personality} |`,
         `| Model | ${modelLine} |`,
         "",
         `Made for fun by [${prov.author}](${prov.authorUrl}).`,
@@ -879,7 +917,8 @@
         `Exported: ${prov.exportedAt}`,
         `Chat created: ${prov.createdAt}`,
         `Chat updated: ${prov.updatedAt}`,
-        `Research mode: ${prov.mode}`,
+        `Research depth: ${prov.mode}`,
+        `Personality: ${prov.personality}`,
         `Model: ${modelLine}`,
         "",
         `Made for fun by ${prov.author}.`,
@@ -900,7 +939,8 @@
       <tr><th>Exported</th><td><time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time></td></tr>
       <tr><th>Chat created</th><td><time datetime="${escapeHtml(prov.createdAt)}">${escapeHtml(prov.createdAt)}</time></td></tr>
       <tr><th>Chat updated</th><td><time datetime="${escapeHtml(prov.updatedAt)}">${escapeHtml(prov.updatedAt)}</time></td></tr>
-      <tr><th>Research mode</th><td>${escapeHtml(prov.mode)}</td></tr>
+      <tr><th>Research depth</th><td>${escapeHtml(prov.mode)}</td></tr>
+      <tr><th>Personality</th><td>${escapeHtml(prov.personality)}</td></tr>
       <tr><th>Model</th><td>${modelLine}</td></tr>
     </table>
     <p class="cite-note">Made for fun by <a href="${escapeHtml(prov.authorUrl)}">${escapeHtml(prov.author)}</a>.</p>
@@ -921,6 +961,7 @@
   <meta name="ndap-export-model" content="${escapeHtml(prov.model)}" />
   <meta name="ndap-export-model-url" content="${escapeHtml(prov.modelUrl)}" />
   <meta name="ndap-export-mode" content="${escapeHtml(prov.mode)}" />
+  <meta name="ndap-export-personality" content="${escapeHtml(prov.personality)}" />
   <link rel="canonical" href="${escapeHtml(prov.appUrl)}" />`;
     }
 
@@ -962,6 +1003,7 @@
           q: t.q,
           a: t.a,
           mode: resolveTurnMode(t, chat),
+          personality: resolveTurnPersonality(t, chat),
           model: resolveTurnModel(t, chat),
           modelUrl: openRouterModelUrl(resolveTurnModel(t, chat)),
           answeredAt: t.answeredAt ? isoStamp(t.answeredAt) : null,
@@ -1015,7 +1057,7 @@
 </head>
 <body>
   <h1>${title}</h1>
-  <p class="meta">Exported <time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time> · ${escapeHtml(prov.mode)} mode · Model: <a href="${escapeHtml(prov.modelUrl)}">${escapeHtml(prov.model)}</a></p>
+  <p class="meta">Exported <time datetime="${escapeHtml(prov.exportedAt)}">${escapeHtml(prov.exportedAt)}</time> · ${escapeHtml(prov.mode)} depth · ${escapeHtml(prov.personality)} personality · Model: <a href="${escapeHtml(prov.modelUrl)}">${escapeHtml(prov.model)}</a></p>
   ${turns}
   ${citationHtml(prov)}
 </body>
@@ -1083,8 +1125,8 @@
           pdf.setProperties({
             title: prov.title,
             author: `${prov.author} — ${prov.appName}`,
-            subject: `${prov.appName} (${prov.mode} mode, ${prov.model})`,
-            keywords: [prov.model, prov.mode, prov.appName, "NDAP", prov.author].join(", "),
+            subject: `${prov.appName} (${prov.mode} depth, ${prov.personality}, ${prov.model})`,
+            keywords: [prov.model, prov.mode, prov.personality, prov.appName, "NDAP", prov.author].join(", "),
             creator: `${prov.appName} (${prov.appUrl})`,
           });
         }
@@ -1100,7 +1142,7 @@
       if (!spec) return;
       const prov = exportProvenance(chat, turn || null);
       const payloadChat = turn
-        ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, mode: resolveTurnMode(turn, chat), model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
+        ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, mode: resolveTurnMode(turn, chat), personality: resolveTurnPersonality(turn, chat), model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
         : chat;
       if (format === "md") {
         downloadFile(`${base}.${spec.ext}`, turn ? buildSingleTurnMarkdown(chat, turn) : buildChatMarkdown(payloadChat), spec.mime);
@@ -1188,9 +1230,9 @@
         getChat: () => currentChat(),
         getTurn: () => {
           const cc = currentChat();
-          if (!cc) return { q: question, a: markdownText || "", model: settings.model };
+          if (!cc) return { q: question, a: markdownText || "", model: modelForPersonality(chatPersonality()), personality: chatPersonality() };
           const hit = [...cc.transcript].reverse().find((t) => t.q === question);
-          return hit || { q: question, a: markdownText || "", model: settings.model };
+          return hit || { q: question, a: markdownText || "", model: modelForPersonality(resolveTurnPersonality(null, cc)), personality: resolveTurnPersonality(null, cc) };
         },
         disabled: () => !question,
       }));
@@ -1204,7 +1246,8 @@
     /* ---------- Settings drawer ---------- */
     function openDrawer() {
       $("key").value = settings.key;
-      $("modelInput").value = settings.model;
+      $("objectiveModelInput").value = settings.objectiveModel;
+      $("judgementalModelInput").value = settings.judgementalModel;
       $("proxyInput").value = settings.proxy;
       $("searchMaxInput").value = settings.searchMax;
       $("deepDownloadsInput").value = settings.deepDownloads;
@@ -1220,7 +1263,9 @@
     }
     function saveSettings() {
       localStorage.setItem(LS.key, $("key").value.trim());
-      localStorage.setItem(LS.model, ($("modelInput").value.trim() || DEFAULT_MODEL));
+      localStorage.setItem(LS.objectiveModel, ($("objectiveModelInput").value.trim() || DEFAULT_OBJECTIVE_MODEL));
+      localStorage.setItem(LS.model, ($("objectiveModelInput").value.trim() || DEFAULT_OBJECTIVE_MODEL));
+      localStorage.setItem(LS.judgementalModel, ($("judgementalModelInput").value.trim() || DEFAULT_JUDGEMENTAL_MODEL));
       localStorage.setItem(LS.proxy, $("proxyInput").value.trim().replace(/\/+$/, ""));
       localStorage.setItem(LS.searchMax, String(Math.max(10, Math.min(500, Number($("searchMaxInput").value || DEFAULT_SEARCH_MAX)))));
       localStorage.setItem(LS.deepDownloads, String(Math.max(1, Math.min(8, Number($("deepDownloadsInput").value || DEFAULT_DEEP_DOWNLOADS)))));
@@ -1313,7 +1358,7 @@
     // Per-query usage accumulator (tokens + cost across all model calls in one run).
     let runUsage = null;
     function resetUsage() {
-      runUsage = { calls: 0, prompt: 0, completion: 0, reasoning: 0, total: 0, cost: 0, hasCost: false };
+      runUsage = { calls: 0, prompt: 0, completion: 0, reasoning: 0, total: 0, cost: 0, hasCost: false, model: "" };
     }
     function accumulateUsage(u) {
       if (!u || !runUsage) return;
@@ -1387,9 +1432,11 @@
       }
     }
     async function orComplete(messages, temperature = 0.2, maxTokens = 1024) {
+      const model = activeRunModel || settings.objectiveModel;
+      if (runUsage && !runUsage.model) runUsage.model = model;
       const res = await fetchWithTimeout(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
+        body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, usage: { include: true } }),
       }, 180000);
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const data = await res.json();
@@ -1397,9 +1444,11 @@
       return data.choices?.[0]?.message?.content || "";
     }
     async function orStream(messages, temperature, onDelta, maxTokens = 1800) {
+      const model = activeRunModel || settings.objectiveModel;
+      if (runUsage && !runUsage.model) runUsage.model = model;
       const res = await fetchWithTimeout(OPENROUTER_URL, {
         method: "POST", headers: orHeaders(),
-        body: JSON.stringify({ model: settings.model, messages, temperature, max_tokens: maxTokens, stream: true, usage: { include: true } }),
+        body: JSON.stringify({ model, messages, temperature, max_tokens: maxTokens, stream: true, usage: { include: true } }),
       }, 240000);
       if (!res.ok) throw new Error(`OpenRouter ${res.status}: ${(await res.text()).slice(0, 240)}`);
       const reader = res.body.getReader();
@@ -1454,7 +1503,7 @@
       html += chip("", "Tokens", u.total.toLocaleString());
       html += `<span class="u-note">${u.prompt.toLocaleString()} in · ${u.completion.toLocaleString()} out${u.reasoning ? ` · ${u.reasoning.toLocaleString()} reasoning` : ""}</span>`;
       html += chip("", "Model calls", String(u.calls));
-      html += `<span class="u-note">${escapeHtml(settings.model)}</span>`;
+      html += `<span class="u-note">${escapeHtml(runUsage.model || settings.objectiveModel)}</span>`;
       foot.innerHTML = html;
       container.appendChild(foot);
     }
@@ -1483,17 +1532,19 @@
       return out.trim();
     }
 
-    function rememberTurn(question, datasetLabel, answer, mode) {
+    function rememberTurn(question, datasetLabel, answer, mode, personality, model) {
       const cc = currentChat();
       if (!cc) return;
       const full = (answer || "").trim();
       const trimmed = full.replace(/\s+/g, " ").trim().slice(0, MAX_ANSWER_CHARS);
       const turnMode = normalizeMode(mode);
-      cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed, mode: turnMode });
+      const turnPersonality = normalizePersonality(personality);
+      cc.convo.push({ q: question.slice(0, 200), dataset: datasetLabel || "", answer: trimmed, mode: turnMode, personality: turnPersonality });
       if (cc.convo.length > MAX_TURNS * 2) cc.convo = cc.convo.slice(-MAX_TURNS * 2);
-      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), mode: turnMode, model: settings.model, answeredAt: Date.now() });
+      cc.transcript.push({ q: question, a: full.slice(0, MAX_SAVED_ANSWER_CHARS), mode: turnMode, personality: turnPersonality, model: model || modelForPersonality(turnPersonality), answeredAt: Date.now() });
       if (cc.transcript.length > MAX_SAVED_TURNS) cc.transcript = cc.transcript.slice(-MAX_SAVED_TURNS);
-      cc.model = settings.model;
+      cc.model = model || modelForPersonality(turnPersonality);
+      cc.personality = turnPersonality;
       convo = cc.convo; transcript = cc.transcript;
       if (!cc.title && cc.transcript.length) cc.title = titleFromQuestion(question);
       cc.updatedAt = Date.now();
@@ -1507,17 +1558,22 @@
       return t.length > 48 ? t.slice(0, 48) + "…" : (t || "New chat");
     }
     function newChatObject() {
-      return { id: (crypto.randomUUID ? crypto.randomUUID() : "c" + Date.now() + Math.random().toString(16).slice(2)), title: "", mode: "fast", createdAt: Date.now(), updatedAt: Date.now(), convo: [], transcript: [] };
+      return { id: (crypto.randomUUID ? crypto.randomUUID() : "c" + Date.now() + Math.random().toString(16).slice(2)), title: "", mode: "fast", personality: "objective", createdAt: Date.now(), updatedAt: Date.now(), convo: [], transcript: [] };
     }
     function currentChat() { return chats.find((c) => c.id === currentChatId) || null; }
     function normalizeMode(mode) {
       const m = String(mode || "fast").toLowerCase();
-      return m === "deep" || m === "scoop" ? m : "fast";
+      return m === "deep" ? "deep" : "fast";
+    }
+    function normalizePersonality(personality) {
+      const p = String(personality || "objective").toLowerCase();
+      return p === "judgemental" ? "judgemental" : "objective";
     }
     function modeLocked(chat = currentChat()) {
       return !!(chat && Array.isArray(chat.transcript) && chat.transcript.length);
     }
     function chatMode() { const c = currentChat(); return normalizeMode(c && c.mode); }
+    function chatPersonality() { const c = currentChat(); return normalizePersonality((c && c.personality) || "objective"); }
     function setChatMode(mode) {
       const c = currentChat();
       if (!c || busy || modeLocked(c)) return;
@@ -1526,19 +1582,38 @@
       renderModeToggle();
       renderChips();
     }
+    function setChatPersonality(personality) {
+      const c = currentChat();
+      if (!c || busy || modeLocked(c)) return;
+      c.personality = normalizePersonality(personality);
+      saveChats();
+      renderModeToggle();
+      renderChips();
+    }
     function renderModeToggle() {
       const box = $("modeToggle");
-      if (!box) return;
+      const pbox = $("personalityToggle");
+      if (!box || !pbox) return;
       const mode = chatMode();
+      const personality = chatPersonality();
       const locked = modeLocked();
-      box.title = locked ? "Mode locked for this chat" : "Choose mode for this chat";
+      box.title = locked ? "Depth locked for this chat" : "Choose research depth for this chat";
+      pbox.title = locked ? "Personality locked for this chat" : "Choose answer personality for this chat";
       box.setAttribute("aria-label", box.title);
+      pbox.setAttribute("aria-label", pbox.title);
       const note = document.querySelector(".chat-mode-note");
-      if (note) note.textContent = locked ? "Mode locked for this chat" : "Choose mode for this chat";
+      const pnote = document.querySelector(".chat-personality-note");
+      if (note) note.textContent = locked ? "Depth locked" : "Depth";
+      if (pnote) pnote.textContent = locked ? "Personality locked" : "Personality";
       box.querySelectorAll("button").forEach((b) => {
         b.classList.toggle("active", b.dataset.mode === mode);
         b.disabled = busy || locked;
-        b.title = locked ? "Mode locked for this chat" : `Start this chat in ${modeLabel(b.dataset.mode)} mode`;
+        b.title = locked ? "Depth locked for this chat" : `Start this chat in ${modeLabel(b.dataset.mode)} depth`;
+      });
+      pbox.querySelectorAll("button").forEach((b) => {
+        b.classList.toggle("active", b.dataset.personality === personality);
+        b.disabled = busy || locked;
+        b.title = locked ? "Personality locked for this chat" : `Use ${personalityLabel(b.dataset.personality)} personality`;
       });
     }
     function saveChats() {
@@ -1548,7 +1623,14 @@
       let data = null;
       try { data = JSON.parse(localStorage.getItem(LS.chats) || "null"); } catch (e) {}
       if (data && Array.isArray(data.chats)) {
-        chats = data.chats.map((c) => ({ convo: [], transcript: [], title: "", mode: "fast", ...c }));
+        chats = data.chats.map((raw) => {
+          const c = { convo: [], transcript: [], title: "", mode: "fast", personality: "objective", ...raw };
+          c.mode = normalizeMode(c.mode);
+          c.personality = normalizePersonality(c.personality);
+          c.convo = (Array.isArray(c.convo) ? c.convo : []).map((t) => ({ ...t, mode: normalizeMode(t.mode || c.mode), personality: normalizePersonality(t.personality || c.personality) }));
+          c.transcript = (Array.isArray(c.transcript) ? c.transcript : []).map((t) => ({ ...t, mode: normalizeMode(t.mode || c.mode), personality: normalizePersonality(t.personality || c.personality) }));
+          return c;
+        });
         currentChatId = data.currentChatId || (chats[0] && chats[0].id) || null;
       } else {
         // migrate the old single-conversation history, if any
@@ -1629,7 +1711,7 @@
         return;
       }
       thread.innerHTML = "";
-      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.q, t.a, resolveTurnMode(t, cc)); }
+      for (const t of cc.transcript) { addUser(t.q); addRestoredAnswer(t.q, t.a, resolveTurnMode(t, cc), resolveTurnPersonality(t, cc)); }
       scrollDown();
     }
 
@@ -1688,18 +1770,22 @@
     function toggleSidebar() { $("sidebar").classList.contains("open") ? closeSidebar() : openSidebar(); }
 
     function modeLabel(mode) {
-      return mode === "deep" ? "Deep" : mode === "scoop" ? "Scoop" : "Fast";
+      return normalizeMode(mode) === "deep" ? "Deep" : "Fast";
     }
 
-    function agentWho(mode) {
-      return `Agent <span class="mode-badge">${modeLabel(mode)}</span>`;
+    function personalityLabel(personality) {
+      return normalizePersonality(personality) === "judgemental" ? "Judgemental" : "Objective";
     }
 
-    function addRestoredAnswer(question, markdownText, mode = "fast") {
+    function agentWho(mode, personality = "objective") {
+      return `Agent <span class="mode-badge">${modeLabel(mode)}</span> <span class="mode-badge">${personalityLabel(personality)}</span>`;
+    }
+
+    function addRestoredAnswer(question, markdownText, mode = "fast", personality = "objective") {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
       const body = el("div", "body");
-      body.appendChild(el("div", "who", agentWho(mode)));
+      body.appendChild(el("div", "who", agentWho(mode, personality)));
       const answer = el("div", "answer");
       renderInto(answer, markdownText || "");
       answer.appendChild(createAnswerTools(question, markdownText));
@@ -2123,11 +2209,11 @@
       scrollDown();
     }
 
-    function addAssistant(mode = "fast") {
+    function addAssistant(mode = "fast", personality = "objective") {
       const m = el("div", "msg bot");
       m.appendChild(el("div", "av", "N"));
       const body = el("div", "body");
-      body.appendChild(el("div", "who", agentWho(mode)));
+      body.appendChild(el("div", "who", agentWho(mode, personality)));
 
       // Process block (thinking) — open while running
       const proc = el("details", "block"); proc.open = true;
@@ -2168,17 +2254,22 @@
       const counts = partial ? `${c.used.length} of ${c.rows.length}${c.truncated ? "+" : ""} fetched` : `${c.used.length} (all rows)`;
       return `Rows provided: ${counts} — ${flag}`;
     }
-    function metadataMessages(question, candidates, histPreamble, mode) {
+    function metadataMessages(question, candidates, histPreamble, personality) {
+      const judgemental = normalizePersonality(personality) === "judgemental";
+      const ask = judgemental
+        ? "Write your judgemental read: which dataset(s) matter, what they can and cannot show for this question, the gaps, and the next action."
+        : "Give a concise, grounded answer: likely dataset(s), why they match, and the next action.";
       return [
-        { role: "system", content: P(mode === "scoop" ? "scoop_metadata_sys" : "metadata_sys") },
-        { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action.` },
+        { role: "system", content: P(judgemental ? "judgemental_metadata_sys" : "metadata_sys") },
+        { role: "user", content: `${histPreamble}Current question:\n${question}\n\nRetrieved candidate metadata (JSON):\n${JSON.stringify(candidates, null, 2)}\n\n${ask}` },
       ];
     }
 
     // Initial synthesis messages. Real-numbers mode starts with tiny previews; the
     // model can request more browser-local tool actions before the final answer.
-    function dataInitialMessages(question, collected, histPreamble, mode) {
-      const sys = mode === "deep" ? P("data_sys_multi") : mode === "scoop" ? P("scoop_sys_single") : P("data_sys_single");
+    function dataInitialMessages(question, collected, histPreamble, mode, personality) {
+      const judgemental = normalizePersonality(personality) === "judgemental";
+      const sys = judgemental ? P("judgemental_sys") : (normalizeMode(mode) === "deep" ? P("data_sys_multi") : P("data_sys_single"));
       const blocks = collected.map((c) => {
         const hidden = c.used.length < c.rows.length;
         const profile = hidden ? `\n${profileText(c)}` : "";
@@ -2272,8 +2363,8 @@
 
     // Synthesis with a bounded browser-local agent loop. The model chooses tool
     // actions; the page validates, executes, and feeds observations back.
-    async function synthesizeWithDrilldown(question, collected, history, ui, mode, onDelta, maxOut) {
-      const messages = dataInitialMessages(question, collected, convoBlock(history), mode);
+    async function synthesizeWithDrilldown(question, collected, history, ui, mode, personality, onDelta, maxOut) {
+      const messages = dataInitialMessages(question, collected, convoBlock(history), mode, personality);
       const state = {
         downloads: collected.length,
         rowsReturned: collected.reduce((n, c) => n + c.used.length, 0),
@@ -2296,8 +2387,9 @@
       }
       throwIfRunAborted();
 
-      const ANSWER_ASK = mode === "scoop" ? P("scoop_answer_ask") : P("answer_ask");
-      const answerTemp = mode === "scoop" ? SCOOP_TEMPERATURE : 0;
+      const judgemental = normalizePersonality(personality) === "judgemental";
+      const ANSWER_ASK = judgemental ? P("judgemental_answer_ask") : P("answer_ask");
+      const answerTemp = judgemental ? JUDGEMENTAL_TEMPERATURE : 0;
       const answer = () => streamOrComplete(messages, answerTemp, onDelta, maxOut);
       messages.push({ role: "user", content: ANSWER_ASK });
       let finalText = await answer();
@@ -2351,7 +2443,7 @@
     }
 
     // Fast: one plan → search → best dataset → synthesize.
-    async function gatherFast(question, history, ui, mode = "fast") {
+    async function gatherFast(question, history, ui, personality = "objective") {
       const planStep = liveStep(ui, "plan_search", history ? "calling model (with prior context)…" : "calling model…", { state: "run" });
       const plan = await planSearch(question, history);
       planStep.done("model proposed search terms", `query: ${plan.search_query}\nreason: ${plan.reason}`);
@@ -2371,11 +2463,11 @@
         const got = await downloadForLLM(pick, question, ui);
         if (got) return { collected: [got], usedDataset: `${got.id} (${got.name})` };
       }
-      return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre, mode), usedDataset: "" };
+      return { messages: metadataMessages(question, candidates.slice(0, FAST_METADATA_CANDIDATES), pre, personality), usedDataset: "" };
     }
 
     // Deep: multi-angle plan → select+download several → reflect → loop → synthesize across sources.
-    async function gatherDeep(question, history, ui, mode = "deep") {
+    async function gatherDeep(question, history, ui, personality = "objective") {
       const planStep = liveStep(ui, "plan_research", "decomposing question into data needs…", { state: "run" });
       const plan = await planDeep(question, history);
       planStep.done(`${plan.queries.length} search angle${plan.queries.length === 1 ? "" : "s"}`,
@@ -2390,7 +2482,7 @@
       if (!pool.length) return { none: true };
 
       const pre = convoBlock(history);
-      const metaFallback = () => ({ messages: metadataMessages(question, pool.slice(0, Math.max(FAST_METADATA_CANDIDATES, 16)), pre, mode), usedDataset: "" });
+      const metaFallback = () => ({ messages: metadataMessages(question, pool.slice(0, Math.max(FAST_METADATA_CANDIDATES, 16)), pre, personality), usedDataset: "" });
       if (!settings.proxy) return metaFallback();
 
       const budget = settings.deepDownloads;
@@ -2475,11 +2567,12 @@
       if (!settings.key) { openDrawer(); $("savedFlash").textContent = "Add your OpenRouter key to start."; return; }
 
       const modeUsed = chatMode();
+      const personalityUsed = chatPersonality();
       const deep = modeUsed === "deep";
-      const scoop = modeUsed === "scoop";
-      const deepEvidence = deep || scoop;
+      const judgemental = personalityUsed === "judgemental";
+      const modelUsed = modelForPersonality(personalityUsed);
       const controller = new AbortController();
-      const deadlineMs = deepEvidence ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
+      const deadlineMs = deep ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
       runAbort = { controller, reason: null, deadlineMs };
       let deadlineTimer = setTimeout(() => {
         if (runAbort) runAbort.reason = "deadline";
@@ -2488,44 +2581,46 @@
 
       setBusy(true);
       resetUsage();
+      activeRunModel = modelUsed;
+      if (runUsage) runUsage.model = modelUsed;
       try { await loadPrompts(); } catch (_) { /* boot load usually has it; metadata/data prompts degrade to empty if truly missing */ }
       input.value = ""; input.style.height = "auto";
       addUser(question);
-      const ui = addAssistant(modeUsed);
+      const ui = addAssistant(modeUsed, personalityUsed);
 
       // surface this chat in the sidebar right away (title from first question)
       const cc0 = currentChat();
       if (cc0 && !cc0.title) { cc0.title = titleFromQuestion(question); cc0.updatedAt = Date.now(); saveChats(); renderChatList(); }
 
       const history = compressedHistory();
-      ui.procMeta.textContent = deep ? "deep research…" : (scoop ? "investigative scoop…" : "working…");
+      ui.procMeta.textContent = deep ? "deep research…" : "working…";
       let usedDataset = "";
       try {
         // 1-4) gather evidence (fast = single pass; deep = multi-angle reflect loop)
-        const result = deepEvidence
-          ? await gatherDeep(question, history, ui, modeUsed)
-          : await gatherFast(question, history, ui, modeUsed);
+        const result = deep
+          ? await gatherDeep(question, history, ui, personalityUsed)
+          : await gatherFast(question, history, ui, personalityUsed);
 
         if (result.none) {
           ui.procMeta.textContent = "done";
           ui.proc.open = false;
           ui.answer.innerHTML = `<div class="err">No matching NDAP datasets in the local index. Try broader or different terms.</div>`;
-          rememberTurn(question, "", "No matching datasets found.", modeUsed);
+          rememberTurn(question, "", "No matching datasets found.", modeUsed, personalityUsed, modelUsed);
           return;
         }
         usedDataset = result.usedDataset || "";
-        const maxOut = scoop ? SCOOP_MAX_OUT : (deep ? 2800 : 1800);
+        const maxOut = judgemental ? JUDGEMENTAL_MAX_OUT : (deep ? 2800 : 1800);
 
         // 5) synthesize (streamed). Data path runs a model-driven "read more rows" loop first.
-        const synthLabel = deep ? "synthesizing across sources…" : (scoop ? "writing the investigative scoop…" : "streaming grounded answer…");
+        const synthLabel = judgemental ? "making judgement calls…" : (deep ? "synthesizing across sources…" : "streaming grounded answer…");
         const synthStep = liveStep(ui, "synthesize_answer", synthLabel, { state: "run" });
         ui.answer.classList.add("cursor");
         const onDelta = (full) => { renderInto(ui.answer, full); scrollDown(); };
         let finalText = "";
         if (result.collected) {
-          finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, modeUsed, onDelta, maxOut);
+          finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, modeUsed, personalityUsed, onDelta, maxOut);
         } else {
-          finalText = await streamOrComplete(result.messages, scoop ? SCOOP_TEMPERATURE : 0, onDelta, maxOut);
+          finalText = await streamOrComplete(result.messages, judgemental ? JUDGEMENTAL_TEMPERATURE : 0, onDelta, maxOut);
         }
         if (!String(finalText || "").trim()) throw new EmptyAnswerError();
         ui.answer.classList.remove("cursor");
@@ -2534,7 +2629,7 @@
         ui.procMeta.textContent = "done";
         ui.proc.open = false;
 
-        rememberTurn(question, usedDataset, finalText, modeUsed);
+        rememberTurn(question, usedDataset, finalText, modeUsed, personalityUsed, modelUsed);
 
         ui.answer.appendChild(createAnswerTools(question, finalText));
       } catch (e) {
@@ -2546,7 +2641,7 @@
           ui.proc.open = true;
           const limitSec = Math.round((runAbort?.deadlineMs || deadlineMs) / 1000);
           const note = reason === "deadline"
-            ? `Stopped after ${limitSec}s (time limit) — start a narrower chat or reduce Deep/Scoop scope.`
+            ? `Stopped after ${limitSec}s (time limit) — start a narrower chat or reduce Deep scope.`
             : "Stopped.";
           if (partial) {
             ui.answer.appendChild(el("div", "err", escapeHtml(note)));
@@ -2561,6 +2656,7 @@
       } finally {
         clearTimeout(deadlineTimer);
         runAbort = null;
+        activeRunModel = null;
         renderUsageFooter(ui.answer);
         setBusy(false);
         input.focus();
@@ -2569,30 +2665,40 @@
 
     /* ---------- wiring ---------- */
     const CHIPS_BY_MODE = {
-      fast: [
-        "What was India's total slum population in 2011? Show the dataset and the exact figure.",
-        "Which NDAP dataset has state-wise crop production by year?",
-        "Compare female literacy across Indian states using the latest available NDAP data.",
-        "Find the best NDAP dataset for district-level school enrolment by social category.",
-      ],
-      deep: [
-        "Compare India's total slum population in 2001 vs 2011 and break it down by sex, with the change and growth rate.",
-        "Which NDAP datasets would I join to correlate state-level rainfall with crop production over time, and what's the geography/time overlap?",
-        "Study the link between district literacy and school enrolment by social category — identify the datasets and how to combine them.",
-        "Track how the urban slum share of population shifted from 2001 to 2011 and which datasets reveal the state-level drivers.",
-      ],
-      scoop: [
-        "Investigate the real COVID death-count story in India using every relevant NDAP dataset you can find.",
-        "Find the hidden story in India's slum data — compare years, states, and any awkward gaps in the official numbers.",
-        "Investigate female labour force participation in India: what do the strongest NDAP datasets reveal, and what's missing?",
-        "Dig through literacy and school-enrolment data to find a sharp, surprising education story worth publishing.",
-      ],
+      objective: {
+        fast: [
+          "What was India's total slum population in 2011? Show the dataset and the exact figure.",
+          "Which NDAP dataset has state-wise crop production by year?",
+          "Compare female literacy across Indian states using the latest available NDAP data.",
+          "Find the best NDAP dataset for district-level school enrolment by social category.",
+        ],
+        deep: [
+          "Compare India's total slum population in 2001 vs 2011 and break it down by sex, with the change and growth rate.",
+          "Which NDAP datasets would I join to correlate state-level rainfall with crop production over time, and what's the geography/time overlap?",
+          "Study the link between district literacy and school enrolment by social category — identify the datasets and how to combine them.",
+          "Track how the urban slum share of population shifted from 2001 to 2011 and which datasets reveal the state-level drivers.",
+        ],
+      },
+      judgemental: {
+        fast: [
+          "Make a judgement call on India's 2011 slum population: what is the real takeaway and what should I be skeptical about?",
+          "Look at state-wise crop production and tell me the strongest pattern, likely correlation, and biggest caveat.",
+          "Find the standout literacy number in the latest NDAP data and explain why it matters.",
+          "Use one school-enrolment dataset to call out the most interesting signal and the most awkward gap.",
+        ],
+        deep: [
+          "Investigate India's COVID death-count data and make the strongest defensible judgement call from the relevant NDAP evidence.",
+          "Find the hidden story in India's slum data — compare years, states, correlations, and awkward gaps in the official numbers.",
+          "Investigate female labour force participation in India: what do the strongest NDAP datasets reveal, what correlates, and what's missing?",
+          "Dig through literacy and school-enrolment data to find the most important judgement call the numbers support.",
+        ],
+      },
     };
     function renderChips() {
       const box = $("chips");
       if (!box) return;
       box.innerHTML = "";
-      const chips = CHIPS_BY_MODE[chatMode()] || CHIPS_BY_MODE.fast;
+      const chips = (CHIPS_BY_MODE[chatPersonality()] || CHIPS_BY_MODE.objective)[chatMode()] || CHIPS_BY_MODE.objective.fast;
       chips.forEach((c) => {
         const b = el("button", "chip", escapeHtml(c));
         b.onclick = () => { $("input").value = c; autoGrow(); run(); };
@@ -2618,6 +2724,9 @@
     $("send").addEventListener("click", onSend);
     $("modeToggle").querySelectorAll("button").forEach((b) => {
       b.addEventListener("click", () => setChatMode(b.dataset.mode));
+    });
+    $("personalityToggle").querySelectorAll("button").forEach((b) => {
+      b.addEventListener("click", () => setChatPersonality(b.dataset.personality));
     });
     $("newChatSide").addEventListener("click", newChat);
     $("menuBtn").addEventListener("click", toggleSidebar);

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-NDAP query regression TEST — a headless mirror of the docs/index.html Fast, Deep & Scoop
-pipelines, used to check answer quality without a browser.
+NDAP query regression TEST — a headless mirror of the docs/index.html Fast/Deep
+depth and Objective/Judgemental personality paths, used to check answer quality without a browser.
 
 Why this file exists (read before editing):
   * It loads its prompts from docs/assets/prompts.json — the SAME file the web app
@@ -10,7 +10,7 @@ Why this file exists (read before editing):
     or edit it in prompts.json and both sides update together.
   * Run with no args to execute the built-in regression suite (the queries we use to
     catch known failures, with light ground-truth checks). Or pass --query/--mode/
-    --homepage/--srit for ad-hoc runs.
+    --personality/--homepage/--srit for ad-hoc runs.
 
 Usage:
   python scripts/test_queries.py                         # built-in regression suite
@@ -79,7 +79,7 @@ SUITE = [
      "expect_any": ["41.7"]},
     {"label": "mumbai-vs-kolkata-slum-share", "mode": "deep",
      "q": "Mumbai vs Kolkata, which has a higher slum population share?",
-     "expect_any": ["not available", "Low Confidence", "Unverified", "city-level", "cannot", "no dataset"]},
+     "expect_any": ["not available", "not in data", "low confidence", "Unverified", "city-level", "cannot", "no dataset"]},
 ]
 
 HOMEPAGE_CHIPS = [
@@ -308,10 +308,24 @@ def download_for_llm(pick, question, row_cap):
     return {"id": pick["id"], "name": pick["name"], "columns": cols, "rows": rows, "used": used, "csv": to_csv(cols, used), "truncated": trunc, "_sent": {id(r) for r in used}}
 
 
-def metadata_messages(question, candidates, mode="fast"):
+def normalize_mode(mode: str) -> str:
+    return "deep" if (mode or "fast").lower() == "deep" else "fast"
+
+
+def normalize_personality(personality: str) -> str:
+    return "judgemental" if (personality or "objective").lower() == "judgemental" else "objective"
+
+
+def metadata_messages(question, candidates, personality="objective"):
+    judgemental = normalize_personality(personality) == "judgemental"
+    ask = (
+        "Write your judgemental read: which dataset(s) matter, what they can and cannot show for this question, the gaps, and the next action."
+        if judgemental
+        else "Give a concise, grounded answer: likely dataset(s), why they match, and the next action."
+    )
     return [
-        {"role": "system", "content": P("scoop_metadata_sys" if mode == "scoop" else "metadata_sys")},
-        {"role": "user", "content": f"Current question:\n{question}\n\nRetrieved candidate metadata (JSON):\n{json.dumps(candidates, indent=2)}\n\nGive a concise, grounded answer: likely dataset(s), why they match, and the next action."},
+        {"role": "system", "content": P("judgemental_metadata_sys" if judgemental else "metadata_sys")},
+        {"role": "user", "content": f"Current question:\n{question}\n\nRetrieved candidate metadata (JSON):\n{json.dumps(candidates, indent=2)}\n\n{ask}"},
     ]
 
 
@@ -483,8 +497,9 @@ def parse_agent_action(text):
     return None
 
 
-def data_initial_messages(question, collected, mode):
-    sys = P("data_sys_multi") if mode == "deep" else (P("scoop_sys_single") if mode == "scoop" else P("data_sys_single"))
+def data_initial_messages(question, collected, mode, personality):
+    judgemental = normalize_personality(personality) == "judgemental"
+    sys = P("judgemental_sys") if judgemental else (P("data_sys_multi") if normalize_mode(mode) == "deep" else P("data_sys_single"))
     blocks = []
     for c in collected:
         hidden = len(c["used"]) < len(c["rows"])
@@ -548,8 +563,8 @@ def execute_agent_action(action, collected, state):
     return {"tool": tool, "rows": 0, "observation": f'Observation: unknown tool "{tool}".'}
 
 
-def synthesize_with_drilldown(model, question, collected, mode):
-    messages = data_initial_messages(question, collected, mode)
+def synthesize_with_drilldown(model, question, collected, mode, personality):
+    messages = data_initial_messages(question, collected, mode, personality)
     drills = []
     state = {"downloads": len(collected), "rows_returned": sum(len(c["used"]) for c in collected)}
     ask = P("agentic_data_ask") or P("drill_ask")
@@ -564,8 +579,9 @@ def synthesize_with_drilldown(model, question, collected, mode):
         obs = execute_agent_action(action, collected, state)
         drills.append({k: v for k, v in obs.items() if k != "observation"})
         messages.append({"role": "user", "content": obs["observation"]})
-    answer_ask = P("scoop_answer_ask") if mode == "scoop" else P("answer_ask")
-    answer_temp = 0.9 if mode == "scoop" else 0
+    judgemental = normalize_personality(personality) == "judgemental"
+    answer_ask = P("judgemental_answer_ask") if judgemental else P("answer_ask")
+    answer_temp = 0.2 if judgemental else 0
     answer_max = 3000
     messages.append({"role": "user", "content": answer_ask})
     final = chat(model, messages, answer_temp, answer_max)
@@ -582,8 +598,9 @@ def synthesize_with_drilldown(model, question, collected, mode):
     return final, drills
 
 
-def gather_fast(model: str, question: str, mode: str = "fast") -> dict:
-    trace = {"mode": mode}
+def gather_fast(model: str, question: str, personality: str = "objective") -> dict:
+    personality = normalize_personality(personality)
+    trace = {"mode": "fast", "personality": personality}
     sq, reason = plan_search(model, question)
     trace["search_query"] = sq
     trace["plan_reason"] = reason
@@ -600,17 +617,18 @@ def gather_fast(model: str, question: str, mode: str = "fast") -> dict:
         got = download_for_llm(pick, question, MAX_LLM_ROWS)
         trace["rows"] = f"{len(got['used'])}/{len(got['rows'])}{'+' if got['truncated'] else ''}"
         trace["completeness"] = rows_note(got)
-        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, [got], mode)
+        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, [got], "fast", personality)
         trace["status"] = "ok"
     except Exception as e:
         trace["status"] = "download_failed"
         trace["error"] = str(e)[:200]
-        trace["answer"] = chat(model, metadata_messages(question, slim(candidates[:FAST_METADATA_CANDIDATES]), mode), 0.9 if mode == "scoop" else 0, 2000)
+        trace["answer"] = chat(model, metadata_messages(question, slim(candidates[:FAST_METADATA_CANDIDATES]), personality), 0.2 if personality == "judgemental" else 0, 3000 if personality == "judgemental" else 2000)
     return trace
 
 
-def gather_deep(model: str, question: str, mode: str = "deep") -> dict:
-    trace = {"mode": mode}
+def gather_deep(model: str, question: str, personality: str = "objective") -> dict:
+    personality = normalize_personality(personality)
+    trace = {"mode": "deep", "personality": personality}
     queries, reason = plan_deep(model, question)
     trace["plan_queries"] = queries
     trace["plan_reason"] = reason
@@ -650,21 +668,24 @@ def gather_deep(model: str, question: str, mode: str = "deep") -> dict:
     trace["dataset_ids"] = [c["id"] for c in collected]
     trace["completeness"] = [rows_note(c) for c in collected]
     if collected:
-        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected, mode)
+        trace["answer"], trace["drills"] = synthesize_with_drilldown(model, question, collected, "deep", personality)
         trace["status"] = "ok"
     else:
         trace["status"] = "metadata_only"
-        trace["answer"] = chat(model, metadata_messages(question, slim(pool[:16]), mode), 0.9 if mode == "scoop" else 0, 3000 if mode == "scoop" else 2000)
+        trace["answer"] = chat(model, metadata_messages(question, slim(pool[:16]), personality), 0.2 if personality == "judgemental" else 0, 3000 if personality == "judgemental" else 2000)
     return trace
 
 
-def run_one(model: str, mode: str, question: str) -> dict:
-    return gather_deep(model, question, mode) if mode in {"deep", "scoop"} else gather_fast(model, question, mode)
+def run_one(model: str, mode: str, question: str, personality: str = "objective") -> dict:
+    depth = normalize_mode(mode)
+    voice = normalize_personality(personality)
+    return gather_deep(model, question, voice) if depth == "deep" else gather_fast(model, question, voice)
 
 
 def main():
     ap = argparse.ArgumentParser(description="NDAP query regression test (shares prompts.json with the web app).")
-    ap.add_argument("--mode", choices=["fast", "deep", "scoop"], help="Mode for --query/--homepage/--srit items (suite items carry their own).")
+    ap.add_argument("--mode", choices=["fast", "deep"], help="Depth for --query/--homepage/--srit items.")
+    ap.add_argument("--personality", choices=["objective", "judgemental"], default="objective", help="Answer personality for ad-hoc runs.")
     ap.add_argument("--model", default="google/gemini-2.5-flash")
     ap.add_argument("--srit", type=Path, help="SRIT template markdown to parse queries from")
     ap.add_argument("--homepage", action="store_true", help="Run the 4 homepage chips")
@@ -673,29 +694,32 @@ def main():
     args = ap.parse_args()
 
     ad_hoc = bool(args.homepage or args.srit or args.query)
-    # items: (label, question, mode, expect_any)
+    # items: (label, question, mode, personality, expect_any)
     items: list[tuple] = []
     if not ad_hoc:
         for s in SUITE:
-            items.append((s["label"], s["q"], s["mode"], s.get("expect_any")))
+            items.append((s["label"], s["q"], s["mode"], s.get("personality", "objective"), s.get("expect_any")))
     else:
         mode = args.mode or "deep"
+        personality = normalize_personality(args.personality)
         if args.homepage:
             for i, q in enumerate(HOMEPAGE_CHIPS, 1):
-                items.append((f"homepage-{i}", q, mode, None))
+                items.append((f"homepage-{i}", q, mode, personality, None))
         if args.srit:
             for i, q in enumerate(parse_srit_queries(args.srit), 1):
-                items.append((f"srit-{i}", q, mode, None))
+                items.append((f"srit-{i}", q, mode, personality, None))
         for i, q in enumerate(args.query or [], 1):
-            items.append((f"custom-{i}", q, mode, None))
+            items.append((f"custom-{i}", q, mode, personality, None))
 
     results = []
     passed = failed = 0
-    for label, question, mode, expect_any in items:
-        print(f"\n[{mode.upper()}] {label} …", flush=True)
+    for label, question, mode, personality, expect_any in items:
+        depth = normalize_mode(mode)
+        voice = normalize_personality(personality)
+        print(f"\n[{depth.upper()} / {voice.upper()}] {label} …", flush=True)
         t0 = time.time()
         try:
-            trace = run_one(args.model, mode, question)
+            trace = run_one(args.model, mode, question, personality)
             trace.update({"label": label, "question": question, "elapsed_s": round(time.time() - t0, 1)})
             if expect_any:
                 ans = str(trace.get("answer") or "")

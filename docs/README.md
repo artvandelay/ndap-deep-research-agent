@@ -12,7 +12,7 @@ Do not rename or move this folder without updating the Pages source in the repo 
 
 | Path | Role |
 |------|------|
-| `index.html` | Browser chat UI (Fast / Deep / Scoop modes, per-chat mode locking, Stop button, and run deadlines) |
+| `index.html` | Browser chat UI (Fast / Deep depth, Objective / Judgemental personality, per-chat locking, Stop button, and run deadlines) |
 | `assets/ndap_index.json` | Metadata search index exported from `data/index.db` |
 | `assets/ndap_recipes.json` | Per-dataset openapi download recipes (real-numbers mode) |
 | `assets/prompts.json` | Single source of truth for all model-facing prompts (shared with `scripts/test_queries.py`) |
@@ -26,4 +26,4 @@ python scripts/export_recipes.py
 
 The published app is fully browser-side. While an answer is running, the Send
 button changes to Stop so the current OpenRouter/proxy request can be aborted.
-Fast runs have a 2-minute wall-clock ceiling; Deep and Scoop runs have a 5-minute ceiling. The chosen mode is locked after the first message in a chat.
+Fast-depth runs have a 2-minute wall-clock ceiling; Deep-depth runs have a 5-minute ceiling. The chosen depth and personality are locked after the first message in a chat.
