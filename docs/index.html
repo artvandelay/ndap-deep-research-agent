@@ -4,6 +4,18 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>NDAP Deep Research Agent</title>
+  <!-- Google tag (gtag.js). Sends only coarse usage analytics; app data stays in-browser. -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-PFDRQ2V0NJ"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag("js", new Date());
+
+    gtag("config", "G-PFDRQ2V0NJ", {
+      allow_google_signals: false,
+      allow_ad_personalization_signals: false
+    });
+  </script>
   <script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" />
@@ -738,6 +750,14 @@
     const JUDGEMENTAL_MAX_OUT = 3000;    // investigative answer budget for Judgemental personality
 
     const $ = (id) => document.getElementById(id);
+    function trackUsage(eventName, params = {}) {
+      if (typeof gtag !== "function") return;
+      gtag("event", eventName, {
+        ...params,
+        transport_type: "beacon",
+      });
+    }
+
     let ndapIndex = null;
     let ndapRecipes = null;       // lazy-loaded on first data fetch
     let ndapPrompts = null;       // single source of truth for prompts (assets/prompts.json)
@@ -1156,6 +1176,7 @@
       const base = safeFilename(turn ? titleFromQuestion(turn.q) : (chat.title || "ndap-chat"));
       const spec = EXPORT_FORMATS.find((f) => f.id === format);
       if (!spec) return;
+      trackUsage("chat_exported", { export_format: format, export_scope: turn ? "turn" : "chat" });
       const prov = exportProvenance(chat, turn || null);
       const payloadChat = turn
         ? { ...chat, title: titleFromQuestion(turn.q), updatedAt: Date.now(), transcript: [{ q: turn.q, a: turn.a, mode: resolveTurnMode(turn, chat), personality: resolveTurnPersonality(turn, chat), model: resolveTurnModel(turn, chat), answeredAt: turn.answeredAt }] }
@@ -1287,6 +1308,7 @@
       localStorage.setItem(LS.searchMax, String(Math.max(10, Math.min(500, Number($("searchMaxInput").value || DEFAULT_SEARCH_MAX)))));
       localStorage.setItem(LS.deepDownloads, String(Math.max(1, Math.min(8, Number($("deepDownloadsInput").value || DEFAULT_DEEP_DOWNLOADS)))));
       refreshKeyPill();
+      trackUsage("settings_saved");
       $("savedFlash").textContent = "Saved ✓";
       setTimeout(() => { $("savedFlash").textContent = ""; }, 1600);
     }
@@ -2621,6 +2643,12 @@
       const personalityUsed = chatPersonality();
       const deep = modeUsed === "deep";
       const judgemental = personalityUsed === "judgemental";
+      const usageMeta = {
+        research_depth: modeUsed,
+        answer_personality: personalityUsed,
+        data_proxy_enabled: Boolean(settings.proxy),
+      };
+      trackUsage("chat_message_sent", usageMeta);
       runModelSmall = settings.smallModel;
       runModelLarge = settings.largeModel;
       const modelUsed = runModelLarge;
@@ -2658,6 +2686,7 @@
           ui.proc.open = false;
           ui.answer.innerHTML = `<div class="err">No matching NDAP datasets in the local index. Try broader or different terms.</div>`;
           rememberTurn(question, "", "No matching datasets found.", modeUsed, personalityUsed, modelUsed);
+          trackUsage("chat_no_dataset", usageMeta);
           return;
         }
         usedDataset = result.usedDataset || "";
@@ -2682,6 +2711,10 @@
         ui.proc.open = false;
 
         rememberTurn(question, usedDataset, finalText, modeUsed, personalityUsed, modelUsed);
+        trackUsage("chat_answer_completed", {
+          ...usageMeta,
+          data_mode: result.collected ? "rows" : "metadata",
+        });
 
         ui.answer.appendChild(createAnswerTools(question, finalText));
       } catch (e) {
@@ -2695,6 +2728,7 @@
           const note = reason === "deadline"
             ? `Stopped after ${limitSec}s (time limit) — start a narrower chat or reduce Deep scope.`
             : "Stopped.";
+          trackUsage("chat_stopped", { ...usageMeta, stop_reason: reason });
           if (partial) {
             ui.answer.appendChild(el("div", "err", escapeHtml(note)));
           } else {
@@ -2704,6 +2738,7 @@
           ui.procMeta.textContent = "error";
           ui.proc.open = true;
           ui.answer.innerHTML = `<div class="err">${escapeHtml(friendlyError(e))}</div>`;
+          trackUsage("chat_error", usageMeta);
         }
       } finally {
         clearTimeout(deadlineTimer);
