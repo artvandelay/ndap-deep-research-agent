@@ -1142,19 +1142,23 @@
     async function exportPdfFromHtml(html, filename, prov) {
       if (typeof html2pdf !== "function") throw new Error("PDF export is still loading — try again in a moment.");
       const host = document.createElement("div");
-      host.style.position = "fixed";
-      host.style.left = "-10000px";
-      host.style.top = "0";
+      host.setAttribute("aria-hidden", "true");
       host.style.width = "794px";
+      host.style.minHeight = "1123px";
+      host.style.pointerEvents = "none";
       host.style.background = "#fff";
+      host.style.color = "#241f17";
+      host.style.fontFamily = "Inter, ui-sans-serif, system-ui, sans-serif";
+      host.style.lineHeight = "1.55";
       host.innerHTML = html.replace(/^[\s\S]*<body[^>]*>/i, "").replace(/<\/body>[\s\S]*$/i, "");
       document.body.appendChild(host);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
       try {
         const pdf = await html2pdf().set({
           margin: [12, 12, 12, 12],
           filename,
           image: { type: "jpeg", quality: 0.95 },
-          html2canvas: { scale: 2, useCORS: true },
+          html2canvas: { scale: 2, useCORS: true, scrollX: 0, scrollY: 0, windowWidth: 794 },
           jsPDF: { unit: "mm", format: "a4", orientation: "portrait" },
         }).from(host).toPdf().get("pdf");
         if (prov) {
