@@ -746,6 +746,7 @@
     const SRC_DISPLAY_CAP = 30;       // candidates rendered in the Sources panel
     const RUN_DEADLINE_FAST_MS = 120000; // overall wall-clock ceiling per Fast run
     const RUN_DEADLINE_DEEP_MS = 300000;  // overall wall-clock ceiling per Deep run
+    const SYNTH_RESERVE_MS = 45000;       // time reserved for the final synthesis call — gather/tool loops stop early to protect this
     const JUDGEMENTAL_TEMPERATURE = 0.2; // low temp — the judgemental prompt carries the voice; keeps numbers grounded on cheap models
     const JUDGEMENTAL_MAX_OUT = 3000;    // investigative answer budget for Judgemental personality
 
@@ -1438,6 +1439,49 @@
       }
     }
 
+    class StalledAnswerError extends Error {
+      constructor() {
+        super("The model stalled on a statement of intent instead of answering, even after a retry. Try again, or switch modes for this question.");
+        this.name = "StalledAnswerError";
+      }
+    }
+
+    const STALLED_ANSWER_MAX_CHARS = 500;
+
+    // A "stalled" reply is a short non-answer where the model narrates what it still
+    // wants to check ("I need to...", "Let me...") instead of writing the final answer.
+    const STALL_INTENT_RE = /^\s*(I need|I(?:'ll| will)|Let me|Before (?:writing|I)|I must|I should|I(?:'m| am) going to)/i;
+    function isStalledAnswer(text) {
+      const t = String(text || "").trim();
+      if (!t) return false; // emptiness is handled separately as EmptyAnswerError
+      return t.length < STALLED_ANSWER_MAX_CHARS && STALL_INTENT_RE.test(t);
+    }
+
+    // Softer signal: short with no digits at all — worth one retry, but never fatal,
+    // because a legitimate short answer (e.g. a plain "Not in data") can be digit-free.
+    function isWeakAnswer(text) {
+      const t = String(text || "").trim();
+      if (!t) return false;
+      return t.length < STALLED_ANSWER_MAX_CHARS && !/\d/.test(t);
+    }
+
+    async function streamFinalAnswer(messages, { temperature, onDelta, maxOut, model, extra = null, ui, retryWeak = false }) {
+      let finalText = await streamOrComplete(messages, temperature, onDelta, maxOut, model, extra);
+      const shouldRetry = isStalledAnswer(finalText) || (retryWeak && isWeakAnswer(finalText));
+      if (!shouldRetry) return finalText;
+
+      const firstText = finalText;
+      const retryReason = isStalledAnswer(finalText) ? "stalled" : "too thin";
+      liveStep(ui, "retry_answer", `first reply ${retryReason} — asking for the real answer…`, { payload: firstText.slice(0, 300) });
+      messages.push({ role: "assistant", content: firstText });
+      messages.push({ role: "user", content: "Your previous reply was not an answer. Write the final answer NOW from the data already provided; if something genuinely cannot be verified, flag it explicitly (e.g. 'Not in data') instead of stalling." });
+      const retried = await streamOrComplete(messages, temperature, onDelta, maxOut, model, extra);
+
+      if (String(retried || "").trim() && !isStalledAnswer(retried)) return retried;
+      onDelta(firstText); // Retry was no better — restore the first reply in the UI.
+      return firstText;
+    }
+
     function combineAbortSignals(signals) {
       if (typeof AbortSignal !== "undefined" && AbortSignal.any) return AbortSignal.any(signals);
       const ctrl = new AbortController();
@@ -1452,6 +1496,14 @@
       if (runAbort?.controller.signal.aborted) {
         throw new RunStopped(runAbort.reason || "user", runAbort.deadlineMs);
       }
+    }
+
+    // True once the run has burned through its deadline minus the reserve kept for the
+    // final synthesis call. Gather/tool loops check this to stop early rather than let
+    // the hard deadline abort the whole run mid-synthesis.
+    function synthReserveExceeded() {
+      if (!runAbort?.startedAt) return false;
+      return Date.now() - runAbort.startedAt >= runAbort.deadlineMs - SYNTH_RESERVE_MS;
     }
 
     async function fetchWithTimeout(url, options = {}, ms = 180000) {
@@ -2461,6 +2513,13 @@
 
       for (let i = 1; i <= MAX_AGENT_STEPS; i++) {
         if (runAbort?.controller.signal.aborted) break;
+        if (synthReserveExceeded()) {
+          liveStep(ui, "agent_step", `round ${i}: skipping — reserving time for the final answer`, { payload: "tool loop stopped early to protect the synthesis time budget" });
+          break;
+        }
+        if (i === MAX_AGENT_STEPS) {
+          messages.push({ role: "user", content: `This is your LAST tool round (${i} of ${MAX_AGENT_STEPS}). Use it only if truly necessary, then you must write the final answer next — no further tool calls will be executed.` });
+        }
         const msg = await orToolCall(messages, AGENT_TOOLS, { model: runModelSmall });
         const calls = Array.isArray(msg.tool_calls) ? msg.tool_calls : [];
         if (!calls.length) {                       // no native call
@@ -2481,8 +2540,10 @@
       const judgemental = normalizePersonality(personality) === "judgemental";
       const ANSWER_ASK = judgemental ? P("judgemental_answer_ask") : P("answer_ask");
       messages.push({ role: "user", content: ANSWER_ASK });
+      const temperature = judgemental ? JUDGEMENTAL_TEMPERATURE : 0;
       // Final answer: LARGE tier, streamed, tools present but tool_choice:"none" so no new calls and no dangling-tool errors.
-      return await streamOrComplete(messages, judgemental ? JUDGEMENTAL_TEMPERATURE : 0, onDelta, maxOut, runModelLarge, { tools: AGENT_TOOLS, tool_choice: "none" });
+      const extra = { tools: AGENT_TOOLS, tool_choice: "none" };
+      return await streamFinalAnswer(messages, { temperature, onDelta, maxOut, model: runModelLarge, extra, ui, retryWeak: true });
     }
 
     function renderSources(ui, candidates) {
@@ -2568,6 +2629,10 @@
 
       for (let iter = 1; iter <= DEEP_MAX_ITERS && collected.length < budget; iter++) {
         if (runAbort?.controller.signal.aborted) break;
+        if (synthReserveExceeded()) {
+          liveStep(ui, "reflect", `round ${iter}: skipping — reserving time for the final answer`, { payload: "gather phase stopped early to protect the synthesis time budget" });
+          break;
+        }
         const remaining = budget - collected.length;
         const sel = liveStep(ui, "select_datasets", `round ${iter}: choosing up to ${remaining}…`, { state: "run" });
         const { picks, reason } = await selectDatasets(question, pool, downloadedIds, remaining, history);
@@ -2581,6 +2646,10 @@
           if (got) collected.push(got);
         }
         if (collected.length >= budget || iter >= DEEP_MAX_ITERS) break;
+        if (synthReserveExceeded()) {
+          liveStep(ui, "reflect", "skipping — reserving time for the final answer", { payload: "gather phase stopped early to protect the synthesis time budget" });
+          break;
+        }
 
         const ref = liveStep(ui, "reflect", "assessing coverage…", { state: "run" });
         const r = await reflect(question, collected, history);
@@ -2658,7 +2727,7 @@
       const modelUsed = runModelLarge;
       const controller = new AbortController();
       const deadlineMs = deep ? RUN_DEADLINE_DEEP_MS : RUN_DEADLINE_FAST_MS;
-      runAbort = { controller, reason: null, deadlineMs };
+      runAbort = { controller, reason: null, deadlineMs, startedAt: Date.now() };
       let deadlineTimer = setTimeout(() => {
         if (runAbort) runAbort.reason = "deadline";
         controller.abort();
@@ -2705,9 +2774,11 @@
         if (result.collected) {
           finalText = await synthesizeWithDrilldown(question, result.collected, history, ui, modeUsed, personalityUsed, onDelta, maxOut);
         } else {
-          finalText = await streamOrComplete(result.messages, judgemental ? JUDGEMENTAL_TEMPERATURE : 0, onDelta, maxOut, runModelLarge);
+          const metaTemperature = judgemental ? JUDGEMENTAL_TEMPERATURE : 0;
+          finalText = await streamFinalAnswer(result.messages, { temperature: metaTemperature, onDelta, maxOut, model: runModelLarge, ui });
         }
         if (!String(finalText || "").trim()) throw new EmptyAnswerError();
+        if (isStalledAnswer(finalText)) throw new StalledAnswerError();
         ui.answer.classList.remove("cursor");
         synthStep.done("answer complete");
 
